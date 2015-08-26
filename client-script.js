@@ -49,7 +49,7 @@ async.series([
         return timesNext();
       }
       async.eachLimit(arr, 50, function (tid, eachNext) {
-        client.execute(insertQuery, [id, 'u1', tid, 'hello!'], { prepare: true}, function (err) {
+        client.execute(insertQuery, [id, 'u1', tid, 'hello!'], { prepare: true, consistency: types.consistencies.any}, function (err) {
           eachNext(err);
         });
       }, function (err) {
@@ -78,7 +78,7 @@ async.series([
       async.eachLimit(ids, 3, function (id, next) {
         var start = process.hrtime();
         var retrieved = 0;
-        client.eachRow(selectQuery, [id], { prepare: true, autoPage: false}, function (n, row) {
+        client.eachRow(selectQuery, [id], { prepare: true, autoPage: true}, function (n, row) {
           //use the row value for something
           retrieved += row['videoid'].toString().length;
         }, function (err) {
