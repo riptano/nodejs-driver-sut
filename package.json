@@ -15,7 +15,7 @@
     }
   ],
   "scripts":  {
-    "sut": "node server.js"
+    "sut": "node src/server.js"
   },
   "repository": {
     "type" : "git",
