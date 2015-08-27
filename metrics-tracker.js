@@ -29,4 +29,14 @@ MetricsTracker.prototype.update = function (key, diff, callback) {
   callback();
 };
 
+MetricsTracker.prototype.shutdown = function (callback) {
+  this.socket.once('close', function (hadError) {
+    if (hadError) {
+      self.log('info', 'The socket closed with a transmission error');
+    }
+    callback();
+  });
+  this.socket.end();
+};
+
 module.exports = MetricsTracker;
