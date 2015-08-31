@@ -34,6 +34,6 @@ if args.configuration_file is not None:
     graphite_host = config.get("run", "metrics_export_graphite_host")
     queries_per_http = config.get("run", "cql_queries_per_http_request")
 
-command = "node %s/src/server.js %s %s" % (current_directory, contact_points, graphite_host)
+command = "node %s/src/server.js %s %s %s" % (current_directory, contact_points, graphite_host, queries_per_http)
 print "# Running command: %s" % (command)
 sys.exit(os.system(command))

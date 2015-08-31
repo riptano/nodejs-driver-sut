@@ -1,8 +1,9 @@
 var net = require('net');
 
-function MetricsTracker(host, port) {
+function MetricsTracker(host, port, driverVersion) {
   this.host = host;
   this.port = port;
+  this.baseKey = 'sut.nodejs-driver.' + driverVersion.replace(/\./g, "_") + '.';
   this.socket = new net.Socket();
 }
 
@@ -25,7 +26,7 @@ MetricsTracker.prototype.update = function (key, diff, callback) {
   var micros = diff[0] * 1000000 + (~~ (diff[1] / 1000));
   //timestamp in seconds
   var timestamp = ~~ (Date.now() / 1000);
-  this.socket.write(key + '.latency ' + micros + ' ' + timestamp + '\n');
+  this.socket.write(this.baseKey + key + '.latency ' + micros + ' ' + timestamp + '\n');
   callback();
 };
 

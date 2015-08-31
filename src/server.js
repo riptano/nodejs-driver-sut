@@ -1,3 +1,4 @@
+var fs = require('fs');
 var express = require('express');
 var bodyParser = require('body-parser');
 var cassandra = require('cassandra-driver');
@@ -7,9 +8,16 @@ var MetricsTracker = require('./metrics-tracker');
 var Repository = require('./repository');
 var Uuid = cassandra.types.Uuid;
 
-var client = new cassandra.Client({ contactPoints: [ process.argv[2] || '127.0.0.1' ], keyspace: 'killrvideo'});
-var tracker = new MetricsTracker(process.argv[3] || '127.0.0.1', 2003);
-var repository = new Repository(client, tracker);
+//settings
+var contactPoint = process.argv[2] || '127.0.0.1';
+var metricsHost = process.argv[3] || '127.0.0.1';
+var executionTimes = parseInt(process.argv[4], 10) || 1;
+var executionLimit = parseInt(process.argv[5], 10) || 50;
+
+var driverVersion = JSON.parse(fs.readFileSync('node_modules/cassandra-driver/package.json', 'utf8')).version;
+var client = new cassandra.Client({ contactPoints: [ contactPoint ], keyspace: 'killrvideo'});
+var tracker = new MetricsTracker(metricsHost, 2003, driverVersion);
+var repository = new Repository(client, tracker, executionTimes, executionLimit);
 var app = express();
 app.use(bodyParser.text());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -63,6 +71,9 @@ async.series([
     return;
   }
   var server = app.listen(8080, function () {
+    console.log();
+    console.log('Using: driver version: %s; contactPoint: %s; metricsHost: %s;\nexecutionTimes: %s; executionLimit: %s',
+      driverVersion, contactPoint, metricsHost, executionTimes, executionLimit);
     console.log('App listening at http://%s:%s', 'localhost', server.address().port);
   });
 });
