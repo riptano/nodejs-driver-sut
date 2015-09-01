@@ -19,7 +19,6 @@ var client = new cassandra.Client({ contactPoints: [ contactPoint ], keyspace: '
 var tracker = new MetricsTracker(metricsHost, 2003, driverVersion);
 var repository = new Repository(client, tracker, executionTimes, executionLimit);
 var app = express();
-app.use(bodyParser.text());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 app.get('/', function (req, res) {
@@ -32,7 +31,7 @@ app.get('/cassandra', function (req, res, next) {
   });
 });
 app.post('/prepared-statements/credentials', function (req, res, next) {
-  repository.insertCredentials(true, getBody(req).email || Uuid.random().toString(), null, function (err, result) {
+  repository.insertCredentials(true, req.body.email || Uuid.random().toString(), null, function (err, result) {
     if (err) return next(err);
     res.json(result);
     next();
@@ -47,7 +46,7 @@ app.get('/prepared-statements/credentials/:email([\\w\\.@_-]+)', function (req, 
   });
 });
 app.post('/prepared-statements/video-events', function (req, res, next) {
-  repository.insertVideoEvent(true, getBody(req), function (err, result) {
+  repository.insertVideoEvent(true, req.body, function (err, result) {
     if (err) return next(err);
     res.json(result);
     next();
@@ -86,10 +85,3 @@ process.on('SIGINT', function() {
     process.exit();
   });
 });
-
-function getBody(req) {
-  if (typeof req.body === 'string') {
-    return JSON.parse(req.body);
-  }
-  return req.body;
-}
