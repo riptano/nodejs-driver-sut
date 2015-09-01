@@ -4,8 +4,9 @@
   "author": "DataStax",
   "dependencies": {
     "async": "^1.4.2",
+    "body-parser": "^1.13.3",
     "express": "^4.1.2",
-    "body-parser": "^1.13.3"
+    "fast-stats": "^0.0.3"
   },
   "licenses": [
     {
@@ -13,14 +14,14 @@
       "url": "http://www.apache.org/licenses/LICENSE-2.0"
     }
   ],
-  "scripts":  {
+  "scripts": {
     "sut": "node src/server.js"
   },
   "repository": {
-    "type" : "git",
-    "url" : "https://github.com/riptano/drivers-benchmarks.git"
+    "type": "git",
+    "url": "https://github.com/riptano/drivers-benchmarks.git"
   },
   "engines": {
-    "node" : ">=0.10.0"
+    "node": ">=0.10.0"
   }
 }
