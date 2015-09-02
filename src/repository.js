@@ -30,7 +30,7 @@ Repository.prototype.insertCredentials = function (prepare, email, password, cal
   var self = this;
   var id = Uuid.random();
   password = password || email;
-  var trackerKey = prepare ? 'prepared-statements-insert-user_credentials' : 'simple-statements-insert-user_credentials';
+  var trackerKey = prepare ? 'prepared.insert.user_credentials' : 'simple.insert.user_credentials';
   var params = [ email, password, id ];
   async.timesLimit(this.times, this.limit, function (n, next) {
     self.execute(prepare, trackerKey, queries.insertCredentials, params, next);
@@ -44,7 +44,7 @@ Repository.prototype.insertCredentials = function (prepare, email, password, cal
 
 Repository.prototype.getCredentials = function (prepare, email, callback) {
   var self = this;
-  var trackerKey = prepare ? 'prepared-statements-select-user_credentials' : 'simple-statements-select-user_credentials';
+  var trackerKey = prepare ? 'prepared.select.user_credentials' : 'simple.select.user_credentials';
   var params = [ email ];
   var getResult;
   async.timesLimit(this.times, this.limit, function (n, next) {
@@ -63,7 +63,7 @@ Repository.prototype.getCredentials = function (prepare, email, callback) {
 
 Repository.prototype.insertVideoEvent = function (prepare, videoEvent, callback) {
   var self = this;
-  var trackerKey = prepare ? 'prepared-statements-insert-video_event' : 'simple-statements-insert-video_event';
+  var trackerKey = prepare ? 'prepared.insert.video_event' : 'simple.insert.video_event';
   var params = [
     Uuid.fromString(videoEvent.videoid),
     Uuid.fromString(videoEvent.userid),
@@ -85,7 +85,7 @@ Repository.prototype.insertVideoEvent = function (prepare, videoEvent, callback)
 
 Repository.prototype.getVideoEvent = function (prepare, videoid, userid, callback) {
   var self = this;
-  var trackerKey = prepare ? 'prepared-statements-select-video_event' : 'simple-statements-select-video_event';
+  var trackerKey = prepare ? 'prepared.select.video_event' : 'simple.select.video_event';
   var params = [ videoid, userid ];
   var getResult;
   async.timesSeries(this.times, function (n, next) {
