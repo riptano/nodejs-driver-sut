@@ -1,12 +1,19 @@
 var net = require('net');
 var Stats = require('fast-stats').Stats;
 
+//amount of seconds for each slice
+var throughputSliceLength = 1;
+var latencySliceLength = 30;
+
 function MetricsTracker(host, port, driverVersion) {
   this.host = host;
   this.port = port;
   this.baseKey = 'sut.nodejs-driver.' + driverVersion.replace(/\./g, "_") + '.';
   this.socket = new net.Socket();
-  this._statMap = null;
+  this._throughputMap = null;
+  this._latencyMap = null;
+  this._throughputSliceTime = null;
+  this._latencySliceTime = null;
 }
 
 MetricsTracker.prototype.connect = function (callback) {
@@ -26,23 +33,29 @@ MetricsTracker.prototype.connect = function (callback) {
 
 MetricsTracker.prototype.update = function (key, diff, callback) {
   //timestamp in seconds
-  var timestamp = ~~ (Date.now() / 1000);
-  if (this._time !== timestamp) {
-    //store current map
-    this._writeMap(this._time, this._statMap);
+  var timestamp = Date.now() / 1000;
+  var throughputSliceTime = ~~(timestamp / throughputSliceLength);
+  var latencySliceTime = ~~(timestamp / latencySliceLength);
+  if (this._throughputSliceTime !== throughputSliceTime) {
+    //save current map
+    this._writeThroughput(this._throughputSliceTime * throughputSliceLength, this._throughputMap);
     //create a new map
-    this._time = timestamp;
-    this._statMap = {
-      throughput: {},
-      latency: {}
-    };
+    this._throughputSliceTime = throughputSliceTime;
+    //the previous map gets de-referenced and will be GC
+    this._throughputMap = {};
+  }
+  if (this._latencySliceTime !== latencySliceTime) {
+    //save current map
+    this._writeLatency(this._latencySliceTime * latencySliceLength, this._latencyMap);
+    //create a new map
+    this._latencySliceTime = latencySliceTime;
+    //the previous map gets de-referenced and will be GC
+    this._latencyMap = {};
   }
   //latency in micros
   var latency = diff[0] * 1000000 + (~~ (diff[1] / 1000));
-  var map = this._statMap;
-  map.throughput[key] = (map.throughput[key] || 0) + 1;
-  //latency in micros
-  map.latency[key] = (map.latency[key] || new Stats({ bucket_precision: 10 })).push(latency);
+  this._throughputMap[key] = (this._throughputMap[key] || 0) + 1;
+  this._latencyMap[key] = (this._latencyMap[key] || new Stats({ bucket_precision: 10 })).push(latency);
   callback();
 };
 
@@ -52,21 +65,34 @@ MetricsTracker.prototype.update = function (key, diff, callback) {
  * @param map
  * @private
  */
-MetricsTracker.prototype._writeMap = function (timestamp, map) {
+MetricsTracker.prototype._writeThroughput = function (timestamp, map) {
   if (!map) {
     return;
   }
-  for (var key in map.throughput) {
-    if (!map.throughput.hasOwnProperty(key)) {
+  for (var key in map) {
+    if (!map.hasOwnProperty(key)) {
       continue;
     }
-    this.socket.write(this.baseKey + key + '.throughput ' + map.throughput[key] + ' ' + timestamp + '\n');
-    var latencies = map.latency[key];
-    this.socket.write(this.baseKey + key + '.p50.latency ' + latencies.percentile(50)  + ' ' + timestamp + '\n');
-    this.socket.write(this.baseKey + key + '.p90.latency ' + latencies.percentile(90)  + ' ' + timestamp + '\n');
-    this.socket.write(this.baseKey + key + '.p95.latency ' + latencies.percentile(95)  + ' ' + timestamp + '\n');
-    this.socket.write(this.baseKey + key + '.p990.latency ' + latencies.percentile(99)  + ' ' + timestamp + '\n');
-    this.socket.write(this.baseKey + key + '.max.latency ' + latencies.percentile(100)  + ' ' + timestamp + '\n');
+    this.socket.write(this.baseKey + key + '.throughput ' + ~~(map[key] / throughputSliceLength) + ' ' + timestamp + '\n');
+  }
+};
+
+MetricsTracker.prototype._writeLatency = function (timestamp, map) {
+  if (!map) {
+    return;
+  }
+  for (var key in map) {
+    if (!map.hasOwnProperty(key)) {
+      continue;
+    }
+    var latencies = map[key];
+    var message =
+      this.baseKey + key + '.p50.latency '  + latencies.percentile(50)  + ' ' + timestamp + '\n' +
+      this.baseKey + key + '.p90.latency '  + latencies.percentile(90)  + ' ' + timestamp + '\n' +
+      this.baseKey + key + '.p95.latency '  + latencies.percentile(95)  + ' ' + timestamp + '\n' +
+      this.baseKey + key + '.p990.latency ' + latencies.percentile(99)  + ' ' + timestamp + '\n' +
+      this.baseKey + key + '.max.latency '  + latencies.percentile(100) + ' ' + timestamp + '\n';
+    this.socket.write(message);
   }
 };
 
