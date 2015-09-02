@@ -13,9 +13,14 @@ var contactPoint = process.argv[2] || '127.0.0.1';
 var metricsHost = process.argv[3] || '127.0.0.1';
 var executionTimes = parseInt(process.argv[4], 10) || 1;
 var executionLimit = parseInt(process.argv[5], 10) || 50;
+var connectionsPerHost = parseInt(process.argv[6], 10) || 1;
 
 var driverVersion = JSON.parse(fs.readFileSync('node_modules/cassandra-driver/package.json', 'utf8')).version;
-var client = new cassandra.Client({ contactPoints: [ contactPoint ], keyspace: 'killrvideo'});
+var client = new cassandra.Client({
+  contactPoints: [ contactPoint ],
+  keyspace: 'killrvideo',
+  pooling: { coreConnectionsPerHost: {'0': connectionsPerHost, '1': 1, '2': 0} }
+});
 var tracker = new MetricsTracker(metricsHost, 2003, driverVersion);
 var repository = new Repository(client, tracker, executionTimes, executionLimit);
 var app = express();
@@ -63,16 +68,21 @@ app.get('/prepared-statements/video-events/:videoid([\\w-]+)/:userid([\\w-]+)', 
 
 async.series([
   client.connect.bind(client),
-  tracker.connect.bind(tracker)
+  tracker.connect.bind(tracker),
+  function warmup(next) {
+    async.timesSeries(100, function (n, nextTime) {
+      client.execute('SELECT key FROM system.local', nextTime);
+    }, next);
+  }
 ], function (err) {
   if (err) {
     console.error('Initialization error', err);
     return;
   }
   var server = app.listen(8080, function () {
-    console.log();
-    console.log('Using: driver version: %s; contactPoint: %s; metricsHost: %s;\nexecutionTimes: %s; executionLimit: %s',
-      driverVersion, contactPoint, metricsHost, executionTimes, executionLimit);
+    console.log('Using: driver version: %s; contactPoint: %s; metricsHost: %s;\n' +
+      'executionTimes: %s; executionLimit: %s; connectionsPerHost: %s',
+      driverVersion, contactPoint, metricsHost, executionTimes, executionLimit, connectionsPerHost);
     console.log('App listening at http://%s:%s', 'localhost', server.address().port);
   });
 });
