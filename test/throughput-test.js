@@ -1,41 +1,37 @@
-var cassandra = require('../nodejs-driver');
-//var cassandra = require('cassandra-driver');
+var cassandra = require('cassandra-driver');
 var assert = require('assert');
 var async = require('async');
 var types = cassandra.types;
+var fs = require('fs');
 
 var contactPoint = process.argv[2] || '127.0.0.1';
 var client = new cassandra.Client({
   contactPoints: [ contactPoint ],
-  keyspace: 'ks1',
+  keyspace: process.argv[3] || 'killrvideo',
   encoding: { copyBuffer: false},
-  socketOptions: { tcpNoDelay: false }
+  socketOptions: { tcpNoDelay: false },
+  pooling: { coreConnectionsPerHost: {'0': parseInt(process.argv[3]) || 8, '1': 1, '2': 0} }
 });
-var insertQuery = 'INSERT INTO comments_by_video (videoid, username, comment_ts, comment) VALUES (?, ?, ?, ?)';
-var selectQuery = 'SELECT videoid, username, comment_ts, comment FROM comments_by_video WHERE videoid = ?';
+var insertQuery = 'INSERT INTO comments_by_video (videoid, userid, commentid, comment) VALUES (?, ?, ?, ?)';
+var selectQuery = 'SELECT videoid, userid, commentid, comment FROM comments_by_video WHERE videoid = ?';
 var ops = 10000;
 var ids = Array.apply(null, new Array(10)).map(function () { return types.Uuid.random();});
+var userId = types.Uuid.random();
 
 async.series([
   client.connect.bind(client),
   function warmup(seriesNext) {
     async.timesSeries(10, function (n, next) {
-      var params = [types.Uuid.random(), 'u1', types.TimeUuid.now(), 'hello!'];
+      var params = [types.Uuid.random(), userId, types.TimeUuid.now(), 'hello!'];
       client.execute(insertQuery, params, { prepare: 1}, next);
     }, function (err) {
       console.log('Starting tests');
       assert.ifError(err);
       console.log('%d Connections per host', client.hosts.slice(0)[0].pool.connections.length);
-      var version = '1.0';
-      if (client._setKeyspace) {
-        version = '2.1';
-      }
-      else if (client._setKeyspaceFirst) {
-        version = '2.0';
-      }
-      console.log('Driver v%s', version);
+      var driverVersion = JSON.parse(fs.readFileSync('node_modules/cassandra-driver/package.json', 'utf8')).version;
+      console.log('Driver v%s', driverVersion);
       console.log('-------------------------');
-      seriesNext(err);
+      seriesNext();
     });
   },
   function insert(seriesNext) {
@@ -49,7 +45,7 @@ async.series([
         return timesNext();
       }
       async.eachLimit(arr, 50, function (tid, eachNext) {
-        client.execute(insertQuery, [id, 'u1', tid, 'hello!'], { prepare: true, consistency: types.consistencies.any}, function (err) {
+        client.execute(insertQuery, [id, userId, tid, 'hello!'], { prepare: true, consistency: types.consistencies.any}, function (err) {
           eachNext(err);
         });
       }, function (err) {
@@ -58,15 +54,18 @@ async.series([
         if (n === 0) {
           console.log('Inserted %d rows', arr.length);
         }
-        else if (n === 1) {
-          console.log('...');
+        else {
+          process.stdout.write('.');
         }
         elapsed.push(end[0] + end[1] / 1000000000);
         timesNext();
       });
     }, function (err) {
-      console.log('mean:   %s secs', mean(elapsed).toFixed(6));
+      process.stdout.write('\n');
+      var meanElapsed = mean(elapsed);
+      console.log('mean:   %s secs', meanElapsed.toFixed(6));
       console.log('median: %s secs', median(elapsed).toFixed(6));
+      console.log('throughput (mean): %s ops/sec', ~~(ops / meanElapsed));
       console.log('-------------------------');
       seriesNext(err);
     });
@@ -89,7 +88,8 @@ async.series([
         });
       }, timesNext);
     }, function (err) {
-      console.log('mean:   %s secs', mean(elapsed).toFixed(6));
+      var meanElapsed = mean(elapsed);
+      console.log('mean:   %s secs', meanElapsed.toFixed(6));
       console.log('median: %s secs', median(elapsed).toFixed(6));
       console.log('-------------------------');
       seriesNext(err);
