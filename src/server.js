@@ -24,7 +24,7 @@ var client = new cassandra.Client({
 var tracker = new MetricsTracker(metricsHost, 2003, driverVersion);
 var repository = new Repository(client, tracker, executionTimes, executionLimit);
 var app = express();
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json({ strict: false }));
 
 app.get('/', function (req, res) {
   res.send('Hello World!');
