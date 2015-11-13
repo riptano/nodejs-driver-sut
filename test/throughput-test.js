@@ -24,7 +24,10 @@ var client = new cassandra.Client({
   policies: { loadBalancing: new cassandra.policies.loadBalancing.DCAwareRoundRobinPolicy()},
   encoding: { copyBuffer: false},
   socketOptions: { tcpNoDelay: true },
-  pooling: { coreConnectionsPerHost: {'0': parseInt(options['connectionsPerHost'], 10), '1': 1, '2': 0} }
+  pooling: {
+    coreConnectionsPerHost: {'0': parseInt(options['connectionsPerHost'], 10), '1': 1, '2': 0},
+    heartBeatInterval: 30000
+  }
 });
 
 var insertQuery = 'INSERT INTO comments_by_video (videoid, commentid, comment) VALUES (?, ?, ?)';
@@ -59,7 +62,7 @@ async.series([
     var elapsed = [];
     var videoIdsLength = videoIds.length;
     var commentIdsLength = commentIds.length;
-    async.timesSeries(5, function (n, nextIteration) {
+    async.timesSeries(3, function (n, nextIteration) {
       var start = process.hrtime();
       async.timesLimit(ops, limit, function (i, next) {
         var params = [videoIds[i % videoIdsLength], commentIds[(~~(i / 100)) % commentIdsLength], i.toString()];
