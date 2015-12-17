@@ -8,8 +8,14 @@ var TimeUuid = cassandra.types.TimeUuid;
 var queries = {
   insertCredentials: 'INSERT INTO user_credentials (email, password, userid) VALUES (?, ?, ?)',
   getCredentials: 'SELECT email, password, userid FROM user_credentials WHERE email = ?',
-  insertVideoEvent: 'INSERT INTO video_event (videoid, userid, event, event_timestamp, video_timestamp) VALUES (?, ?, ?, ?, ?)',
-  getVideoEvent: 'SELECT videoid, userid, event, event_timestamp, video_timestamp FROM video_event WHERE videoid = ? and userid = ?'
+  insertVideo: 'INSERT INTO videos (videoid, userid, name, description, location, location_type,' +
+               ' preview_thumbnails, tags, added_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  getVideo: 'SELECT videoid, userid, name, description, location, location_type, preview_thumbnails, tags, ' +
+            ' added_date FROM videos WHERE videoid = ?',
+  insertVideoEvent: 'INSERT INTO video_event (videoid, userid, event, event_timestamp, video_timestamp) VALUES' +
+                    ' (?, ?, ?, ?, ?)',
+  getVideoEvent: 'SELECT videoid, userid, event, event_timestamp, video_timestamp FROM video_event WHERE' +
+                 ' videoid = ? and userid = ?'
 };
 
 /**
@@ -61,6 +67,52 @@ Repository.prototype.getCredentials = function (prepare, email, callback) {
   });
 };
 
+Repository.prototype.insertVideo = function (prepare, video, callback) {
+  var self = this;
+  var trackerKey = prepare ? 'prepared.insert.video' : 'simple.insert.video';
+  video.videoid = Uuid.random();
+  var params = [
+    video.videoid,
+    Uuid.fromString(video.userid),
+    video.name,
+    video.description,
+    video.location,
+    parseInt(video.location_type, 10),
+    video.preview_thumbnails,
+    video.tags,
+    new Date(video.added_date)
+  ];
+  async.timesLimit(this.times, this.limit, function (n, next) {
+    self.execute(prepare, trackerKey, queries.insertVideo, params, function (err) {
+      next(err);
+    });
+  }, function (err) {
+    if (err) {
+      return callback(err);
+    }
+    callback(null, video);
+  });
+};
+
+Repository.prototype.getVideo = function (prepare, videoId, callback) {
+  var self = this;
+  var trackerKey = prepare ? 'prepared.select.video' : 'simple.select.video';
+  var params = [ videoId ];
+  var getResult;
+  async.timesLimit(this.times, this.limit, function (n, next) {
+    self.execute(prepare, trackerKey, queries.getVideo, params, function (err, result) {
+      if (err) return next(err);
+      getResult = result.first();
+      next();
+    });
+  }, function (err) {
+    if (err) {
+      return callback(err);
+    }
+    callback(null, getResult);
+  });
+};
+
 Repository.prototype.insertVideoEvent = function (prepare, videoEvent, callback) {
   var self = this;
   var trackerKey = prepare ? 'prepared.insert.video_event' : 'simple.insert.video_event';
@@ -68,8 +120,8 @@ Repository.prototype.insertVideoEvent = function (prepare, videoEvent, callback)
     Uuid.fromString(videoEvent.videoid),
     Uuid.fromString(videoEvent.userid),
     videoEvent.event,
-    TimeUuid.fromString(videoEvent.eventTimestamp),
-    cassandra.types.Long.fromString(videoEvent.videoTimestamp)
+    TimeUuid.fromString(videoEvent.event_timestamp),
+    cassandra.types.Long.fromString(videoEvent.video_timestamp)
   ];
   async.timesLimit(this.times, this.limit, function (n, next) {
     self.execute(prepare, trackerKey, queries.insertVideoEvent, params, function (err) {
@@ -88,7 +140,7 @@ Repository.prototype.getVideoEvent = function (prepare, videoid, userid, callbac
   var trackerKey = prepare ? 'prepared.select.video_event' : 'simple.select.video_event';
   var params = [ videoid, userid ];
   var getResult;
-  async.timesSeries(this.times, function (n, next) {
+  async.timesLimit(this.times, this.limit, function (n, next) {
     self.execute(prepare, trackerKey, queries.getVideoEvent, params, function (err, result) {
       if (err) return next(err);
       getResult = result.first();

@@ -16,7 +16,7 @@ var client = new cassandra.Client({
 });
 var insertQuery = 'INSERT INTO comments_by_video (videoid, userid, commentid, comment) VALUES (?, ?, ?, ?)';
 var selectQuery = 'SELECT videoid, userid, commentid, comment FROM comments_by_video WHERE videoid = ? and commentid = ?';
-var ops = 20000;
+var ops = 40000;
 var ids = Array.apply(null, new Array(10)).map(function () { return types.Uuid.random();});
 var userId = types.Uuid.random();
 var selectParams;
@@ -50,13 +50,13 @@ async.series([
     console.log('Starting insert test');
     var elapsed = [];
     var arr = Array.apply(null, new Array(ops)).map(function () { return types.TimeUuid.now() });
-    async.timesSeries(10, function (n, timesNext) {
+    async.timesSeries(5, function (n, timesNext) {
       var start = process.hrtime();
       var id = ids[n];
       if (!id) {
         return timesNext();
       }
-      async.eachLimit(arr, 50, function (tid, eachNext) {
+      async.eachLimit(arr, 256, function (tid, eachNext) {
         client.execute(insertQuery, [id, userId, tid, 'hello!'], { prepare: true, consistency: types.consistencies.any}, function (err) {
           eachNext(err);
         });
@@ -86,13 +86,13 @@ async.series([
     console.log('Starting select test');
     var elapsed = [];
     var arr = Array.apply(null, new Array(ops)).map(function () { return types.TimeUuid.now() });
-    async.timesSeries(10, function (n, timesNext) {
+    async.timesSeries(5, function (n, timesNext) {
       var start = process.hrtime();
       var id = ids[n];
       if (!id) {
         return timesNext();
       }
-      async.eachLimit(arr, 50, function (tid, eachNext) {
+      async.eachLimit(arr, 256, function (tid, eachNext) {
         client.execute(selectQuery, selectParams, { prepare: true, consistency: types.consistencies.one}, function (err) {
           eachNext(err);
         });

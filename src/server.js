@@ -50,6 +50,21 @@ app.get('/prepared-statements/credentials/:email([\\w\\.@_-]+)', function (req, 
     next();
   });
 });
+app.post('/prepared-statements/videos', function (req, res, next) {
+  repository.insertVideo(true, req.body, function (err, result) {
+    if (err) return next(err);
+    res.json(result);
+    next();
+  });
+});
+app.get('/prepared-statements/videos/:videoid([\\w-]+)', function (req, res, next) {
+  repository.getVideo(true, req.params.videoid, function (err, result) {
+    if (err) return next(err);
+    if (!result) return res.status(404).send('Not found');
+    res.json(result);
+    next();
+  });
+});
 app.post('/prepared-statements/video-events', function (req, res, next) {
   repository.insertVideoEvent(true, req.body, function (err, result) {
     if (err) return next(err);

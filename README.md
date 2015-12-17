@@ -5,6 +5,7 @@ HTTP wrapper for the Node.js driver for Apache Cassandra, suitable for benchmark
 ## Installation
 
 ```bash
+npm install datastax/nodejs-driver#master
 npm install
 ```
 
