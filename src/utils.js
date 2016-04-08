@@ -43,6 +43,17 @@ exports.parseOptions = function parseOptions(optionNames, defaults) {
   return options;
 };
 
+exports.requireOptional = function (moduleName) {
+  var result;
+  try{
+    result = require(moduleName);
+  }
+  catch (e) {
+    console.error('Module %s not found', moduleName);
+  }
+  return result;
+};
+
 /**
  * @param options
  */
