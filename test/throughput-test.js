@@ -2,20 +2,24 @@
 var cassandra = require('cassandra-driver');
 var assert = require('assert');
 var async = require('async');
+var metrics = require('metrics');
 var types = cassandra.types;
 var util = require('util');
 var utils = require('../src/utils');
+var currentMicros = utils.currentMicros;
 
 var options = utils.parseOptions({
   'c': 'contactPoint',
   'ks': 'keyspace',
   'p': 'connectionsPerHost',
   'r': 'ops',
+  's': 'series',
   'o': 'outstanding'
 }, {
   outstanding: 256,
   connectionsPerHost: 1,
-  ops: 100000
+  ops: 100000,
+  series: 10
 });
 
 var client = new cassandra.Client({
@@ -33,6 +37,7 @@ var client = new cassandra.Client({
 var insertQuery = 'INSERT INTO comments_by_video (videoid, commentid, comment) VALUES (?, ?, ?)';
 var selectQuery = 'SELECT comment FROM comments_by_video WHERE videoid = ? and commentid = ?';
 var ops = parseInt(options['ops'], 10);
+var series = parseInt(options['series'], 10);
 var commentIds = utils.times(ops / 100, types.TimeUuid.now);
 var videoIds = utils.times(ops / 100, types.Uuid.random);
 var limit = parseInt(options['outstanding'], 10);
@@ -59,66 +64,61 @@ async.series([
   },
   function insert(seriesNext) {
     console.log('Starting insert test');
-    var elapsed = [];
     var videoIdsLength = videoIds.length;
     var commentIdsLength = commentIds.length;
-    async.timesSeries(3, function (n, nextIteration) {
-      var start = process.hrtime();
+    var totalTimer = new metrics.Timer();
+    logTimerHeader();
+    async.timesSeries(series, function (n, nextIteration) {
+      var seriesTimer = new metrics.Timer();
       async.timesLimit(ops, limit, function (i, next) {
         var params = [videoIds[i % videoIdsLength], commentIds[(~~(i / 100)) % commentIdsLength], i.toString()];
+        var queryStart = currentMicros();
         client.execute(insertQuery, params, { prepare: true, consistency: types.consistencies.any}, function (err) {
+          var duration = currentMicros() - queryStart;
+          seriesTimer.update(duration);
+          totalTimer.update(duration);
           next(err);
         });
       }, function (err) {
         assert.ifError(err);
-        var end = process.hrtime(start);
-        if (n === 0) {
-          console.log('Executed %d times', ops);
-        }
-        else {
-          process.stdout.write('.');
-        }
-        elapsed.push(end[0] + end[1] / 1000000000);
+        logTimer(seriesTimer);
         nextIteration();
       });
     }, function (err) {
       process.stdout.write('\n');
-      var meanElapsed = utils.mean(elapsed);
-      console.log('mean:   %s secs', meanElapsed.toFixed(4));
-      console.log('median: %s secs', utils.median(elapsed).toFixed(4));
-      console.log('throughput (mean): %s ops/sec', ~~(ops / meanElapsed));
+      console.log("Totals:");
+      logTimerHeader();
+      logTimer(totalTimer);
       console.log('-------------------------');
       seriesNext(err);
     });
   },
   function select(seriesNext) {
     console.log('Starting select test');
-    var elapsed = [];
-    async.timesSeries(5, function (n, nextIteration) {
-      var start = process.hrtime();
+    var totalTimer = new metrics.Timer();
+    logTimerHeader();
+    async.timesSeries(series, function (n, nextIteration) {
+      var seriesTimer = new metrics.Timer();
+      var queryStart = currentMicros();
       async.timesLimit(ops, limit, function (n, next) {
-        var params = [videoIds[n % 100], commentIds[(~~(n / 100)) % 100], n.toString()];
-        client.execute(insertQuery, params, { prepare: true, consistency: types.consistencies.any}, function (err) {
+        var params = [videoIds[n % 100], commentIds[(~~(n / 100)) % 100]];
+        var queryStart = currentMicros();
+        client.execute(selectQuery, params, { prepare: true, consistency: types.consistencies.any}, function (err) {
+          var duration = currentMicros() - queryStart;
+          seriesTimer.update(duration);
+          totalTimer.update(duration);
           next(err);
         });
       }, function (err) {
         assert.ifError(err);
-        var end = process.hrtime(start);
-        if (n === 0) {
-          console.log('Executed %d times', ops);
-        }
-        else {
-          process.stdout.write('.');
-        }
-        elapsed.push(end[0] + end[1] / 1000000000);
+        logTimer(seriesTimer);
         nextIteration();
       });
     }, function (err) {
       process.stdout.write('\n');
-      var meanElapsed = utils.mean(elapsed);
-      console.log('mean:   %s secs', meanElapsed.toFixed(4));
-      console.log('median: %s secs', utils.median(elapsed).toFixed(4));
-      console.log('throughput (mean): %s ops/sec', ~~(ops / meanElapsed));
+      console.log("Totals:");
+      logTimerHeader();
+      logTimer(totalTimer);
       console.log('-------------------------');
       seriesNext(err);
     });
@@ -127,3 +127,28 @@ async.series([
   assert.ifError(err);
   client.shutdown();
 });
+
+function logTimerHeader() {
+  console.log("min,25,50,75,95,98,99,99.9,max,mean,count,thrpt,rss,heapTotal,heapUsed");
+}
+
+function logTimer(timer) {
+  var percentiles = timer.percentiles([.25,.50,.75,.95,.98,.99,.999]);
+  var mem = process.memoryUsage();
+  console.log("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+    timer.min().toFixed(2),
+    percentiles['0.25'].toFixed(2),
+    percentiles['0.5'].toFixed(2),
+    percentiles['0.75'].toFixed(2),
+    percentiles['0.95'].toFixed(2),
+    percentiles['0.98'].toFixed(2),
+    percentiles['0.99'].toFixed(2),
+    percentiles['0.999'].toFixed(2),
+    timer.max().toFixed(2),
+    timer.mean().toFixed(2),
+    timer.count(),
+    timer.meanRate().toFixed(2),
+    (mem.rss / 1024.0 / 1024.0).toFixed(2),
+    (mem.heapTotal / 1024.0 / 1024.0).toFixed(2),
+    (mem.heapUsed / 1024.0 / 1024.0).toFixed(2));
+}

@@ -54,6 +54,11 @@ exports.requireOptional = function (moduleName) {
   return result;
 };
 
+exports.currentMicros = function() {
+  var t = process.hrtime();
+  return t[0] * 1000 + t[1] / 1000000;
+}
+
 /**
  * @param options
  */
@@ -64,6 +69,7 @@ exports.outputTestHeader = function outputTestHeader(options) {
   console.log('- Driver v%s', driverVersion);
   console.log('- Connections per hosts: %d', options.connectionsPerHost);
   console.log('- Max outstanding requests: %d', options.outstanding);
-  console.log('- Operations: %d', options.ops);
+  console.log('- Operations per series: %d', options.ops);
+  console.log('- Series count: %d', options.series);
   console.log('-----------------------------------------------------');
 };
