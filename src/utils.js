@@ -39,6 +39,16 @@ exports.min = function min(arr) {
 };
 
 var parseOptions = exports.parseOptions = function parseOptions(optionNames, defaults) {
+  if (process.argv.indexOf('-h') > 0 || process.argv.indexOf('--help') > 0){
+    // print options
+    console.log('Usage:\n\tnode <file_name> <options>');
+    console.log('Where options can be:');
+    Object.keys(optionNames).forEach(function (name) {
+      var values = optionNames[name];
+      console.log('\t-%s <%s>\n\t\t%s', name, values[0].toUpperCase(), values[1] || '');
+    });
+    return process.exit();
+  }
   var options = {};
   for (var i = 0; i < process.argv.length; i = i + 2) {
     var optionId = process.argv[i];
@@ -46,7 +56,10 @@ var parseOptions = exports.parseOptions = function parseOptions(optionNames, def
       continue;
     }
     optionId = optionId.substr(1);
-    var name = optionNames[optionId] || optionId;
+    var name = optionId;
+    if (optionNames[optionId]) {
+      name = optionNames[optionId][0] || optionId;
+    }
     options[name] = process.argv[i + 1];
   }
   Object.keys(defaults).forEach(function (name) {
@@ -66,12 +79,13 @@ var parseOptions = exports.parseOptions = function parseOptions(optionNames, def
  */
 exports.parseCommonOptions = function parseCommonOptions(defaults) {
   return parseOptions({
-    'c': 'contactPoint',
-    'ks': 'keyspace',
-    'p': 'connectionsPerHost',
-    'r': 'ops',
-    's': 'series',
-    'o': 'outstanding'
+    'c':  ['contactPoint', 'Cassandra contact point'],
+    'ks': ['keyspace', 'Keyspace name'],
+    'p':  ['connectionsPerHost', 'Number of connections per host'],
+    'r':  ['ops', 'Number of requests per series'],
+    's':  ['series', 'Number of series'],
+    'o':  ['outstanding', 'Maximum amount of outstanding requests'],
+    'h':  ['help', 'Displays the help']
   }, extend({
     outstanding: 256,
     connectionsPerHost: 1,

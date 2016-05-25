@@ -48,7 +48,7 @@ async.series([
     });
   },
   function insert(seriesNext) {
-    console.log('Starting insert test');
+    console.log('Insert test');
     var videoIdsLength = videoIds.length;
     var commentIdsLength = commentIds.length;
     var totalTimer = new metrics.Timer();
@@ -79,7 +79,7 @@ async.series([
     });
   },
   function select(seriesNext) {
-    console.log('Starting select test');
+    console.log('Select test');
     var totalTimer = new metrics.Timer();
     utils.logTimerHeader();
     async.timesSeries(options.series, function (n, nextIteration) {

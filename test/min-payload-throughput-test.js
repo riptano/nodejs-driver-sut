@@ -47,10 +47,10 @@ async.series([
     });
   },
   function insert(seriesNext) {
-    console.log('Starting insert test');
+    console.log('Minimum payload test');
     var totalTimer = new metrics.Timer();
     utils.logTimerHeader();
-    async.timesSeries(options.series, function (n, nextIteration) {
+    utils.timesSeries(options.series, function (n, nextIteration) {
       var seriesTimer = new metrics.Timer();
       utils.timesLimit(options.ops, limit, function (i, next) {
         var queryStart = currentMicros();
