@@ -68,9 +68,9 @@ async.series([
     var commentIdsLength = commentIds.length;
     var totalTimer = new metrics.Timer();
     logTimerHeader();
-    async.timesSeries(series, function (n, nextIteration) {
+    utils.timesSeries(series, function (n, nextIteration) {
       var seriesTimer = new metrics.Timer();
-      async.timesLimit(ops, limit, function (i, next) {
+      utils.timesLimit(ops, limit, function (i, next) {
         var params = [videoIds[i % videoIdsLength], commentIds[(~~(i / 100)) % commentIdsLength], i.toString()];
         var queryStart = currentMicros();
         client.execute(insertQuery, params, { prepare: true, consistency: types.consistencies.any}, function (err) {
@@ -99,7 +99,6 @@ async.series([
     logTimerHeader();
     async.timesSeries(series, function (n, nextIteration) {
       var seriesTimer = new metrics.Timer();
-      var queryStart = currentMicros();
       async.timesLimit(ops, limit, function (n, next) {
         var params = [videoIds[n % 100], commentIds[(~~(n / 100)) % 100]];
         var queryStart = currentMicros();
