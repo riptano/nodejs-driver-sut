@@ -26,7 +26,19 @@ exports.median = function median(arr) {
   return (left + right) / 2;
 };
 
-exports.parseOptions = function parseOptions(optionNames, defaults) {
+exports.min = function min(arr) {
+  if (!arr || arr.length === 0) {
+    throw new Error('No elements');
+  }
+  return arr.reduce(function (prev, curr) {
+    if (curr < prev) {
+      return curr;
+    }
+    return prev;
+  }, 9007199254740991);
+};
+
+var parseOptions = exports.parseOptions = function parseOptions(optionNames, defaults) {
   var options = {};
   for (var i = 0; i < process.argv.length; i = i + 2) {
     var optionId = process.argv[i];
@@ -39,8 +51,48 @@ exports.parseOptions = function parseOptions(optionNames, defaults) {
   }
   Object.keys(defaults).forEach(function (name) {
     options[name] = options[name] || defaults[name];
+    if (typeof defaults[name] === 'number') {
+      // use the same type
+      options[name] = parseFloat(options[name]);
+    }
   });
   return options;
+};
+
+/**
+ * @param defaults
+ * @returns {{contactPoint: String|undefined, keyspace: String|undefined, outstanding: Number, ops: Number,
+ *  series: Number, connectionsPerHost: Number}}
+ */
+exports.parseCommonOptions = function parseCommonOptions(defaults) {
+  return parseOptions({
+    'c': 'contactPoint',
+    'ks': 'keyspace',
+    'p': 'connectionsPerHost',
+    'r': 'ops',
+    's': 'series',
+    'o': 'outstanding'
+  }, extend({
+    outstanding: 256,
+    connectionsPerHost: 1,
+    ops: 100000,
+    series: 10
+  }, defaults));
+};
+
+/**
+ * Merge the contents of two or more objects together into the first object. Similar to jQuery.extend
+ */
+var extend = exports.extend = function (target) {
+  var sources = Array.prototype.slice.call(arguments, 1);
+  sources.forEach(function (source) {
+    for (var prop in source) {
+      if (source.hasOwnProperty(prop)) {
+        target[prop] = source[prop];
+      }
+    }
+  });
+  return target;
 };
 
 exports.requireOptional = function (moduleName) {
@@ -80,7 +132,7 @@ exports.outputTestHeader = function outputTestHeader(options) {
  * @param {Function} iteratorFunc
  * @param {Function} [callback]
  */
-exports.timesLimit = function timesLimit(count, limit, iteratorFunc, callback) {
+exports.timesLimit = function (count, limit, iteratorFunc, callback) {
   callback = callback || noop;
   limit = Math.min(limit, count);
   var index = limit - 1;
@@ -127,4 +179,29 @@ exports.timesSeries = function timesSeries(count, iteratorFunction, callback) {
     }
     iteratorFunction(index, next);
   }
+};
+
+exports.logTimerHeader = function () {
+  console.log("min,25,50,75,95,98,99,99.9,max,mean,count,thrpt,rss,heapTotal,heapUsed");
+};
+
+exports.logTimer = function (timer) {
+  var percentiles = timer.percentiles([.25,.50,.75,.95,.98,.99,.999]);
+  var mem = process.memoryUsage();
+  console.log("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+    timer.min().toFixed(2),
+    percentiles['0.25'].toFixed(2),
+    percentiles['0.5'].toFixed(2),
+    percentiles['0.75'].toFixed(2),
+    percentiles['0.95'].toFixed(2),
+    percentiles['0.98'].toFixed(2),
+    percentiles['0.99'].toFixed(2),
+    percentiles['0.999'].toFixed(2),
+    timer.max().toFixed(2),
+    timer.mean().toFixed(2),
+    timer.count(),
+    timer.meanRate().toFixed(2),
+    (mem.rss / 1024.0 / 1024.0).toFixed(2),
+    (mem.heapTotal / 1024.0 / 1024.0).toFixed(2),
+    (mem.heapUsed / 1024.0 / 1024.0).toFixed(2));
 };
