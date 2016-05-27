@@ -34,7 +34,13 @@ var helper = {
       callback(results);
     });
   },
-  timesSeries: timesSeries
+  timesSeries: timesSeries,
+  syncTimes: function (n, handler) {
+    for (var i = 0; i < n; i++) {
+      handler(i);
+    }
+  },
+  avg: avg
 };
 
 function whilst(condition, fn, callback) {
