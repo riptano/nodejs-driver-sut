@@ -70,11 +70,8 @@ async.series([
         nextIteration();
       });
     }, function (err) {
-      process.stdout.write('\n');
-      console.log("Totals:");
-      utils.logTimerHeader();
-      utils.logTimer(totalTimer);
-      console.log('-------------------------');
+      assert.ifError(err);
+      utils.logTotals(totalTimer);
       seriesNext(err);
     });
   },
@@ -99,11 +96,8 @@ async.series([
         nextIteration();
       });
     }, function (err) {
-      process.stdout.write('\n');
-      console.log("Totals:");
-      utils.logTimerHeader();
-      utils.logTimer(totalTimer);
-      console.log('-------------------------');
+      assert.ifError(err);
+      utils.logTotals(totalTimer);
       seriesNext(err);
     });
   }], function seriesFinished(err) {

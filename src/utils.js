@@ -1,5 +1,6 @@
 'use strict';
 var fs = require('fs');
+var Promise = require('bluebird');
 
 exports.times = function times (n, f){
   var arr = new Array(n);
@@ -78,20 +79,36 @@ var parseOptions = exports.parseOptions = function parseOptions(optionNames, def
  *  series: Number, connectionsPerHost: Number}}
  */
 exports.parseCommonOptions = function parseCommonOptions(defaults) {
-  return parseOptions({
+  var options = parseOptions({
     'c':  ['contactPoint', 'Cassandra contact point'],
     'ks': ['keyspace', 'Keyspace name'],
     'p':  ['connectionsPerHost', 'Number of connections per host'],
     'r':  ['ops', 'Number of requests per series'],
     's':  ['series', 'Number of series'],
     'o':  ['outstanding', 'Maximum amount of outstanding requests'],
+    'f':  ['promiseFactoryName', 'Promise factory to use, options: [\'default\', \'bluebird\', \'q\']'],
     'h':  ['help', 'Displays the help']
   }, extend({
     outstanding: 256,
     connectionsPerHost: 1,
     ops: 100000,
-    series: 10
+    series: 10,
+    promiseFactoryName: 'default'
   }, defaults));
+
+  if (options.promiseFactoryName === 'bluebird') {
+    options.promiseFactory = require('bluebird').fromCallback;
+  } else if (options.promiseFactoryName === 'q') {
+    // wrap Q.nfcall.
+    var Q = require(options.promiseFactoryName);
+    options.promiseFactory = function qFactory(handlerWrapper) {
+      return Q.nfcall(handlerWrapper);
+    };
+  } else if (options.promiseFactoryName !== 'default') {
+    console.error("Got unknown promise factory for option '-f': %s", options.promiseFactoryName);
+    process.exit(-1);
+  }
+  return options;
 };
 
 /**
@@ -137,6 +154,7 @@ exports.outputTestHeader = function outputTestHeader(options) {
   console.log('- Max outstanding requests: %d', options.outstanding);
   console.log('- Operations per series: %d', options.ops);
   console.log('- Series count: %d', options.series);
+  console.log('- Promise factory: %s', options.promiseFactoryName);
   console.log('-----------------------------------------------------');
 };
 
@@ -218,4 +236,41 @@ exports.logTimer = function (timer) {
     (mem.rss / 1024.0 / 1024.0).toFixed(2),
     (mem.heapTotal / 1024.0 / 1024.0).toFixed(2),
     (mem.heapUsed / 1024.0 / 1024.0).toFixed(2));
+};
+
+// Logs a final summary with the given timer.
+exports.logTotals = function (totalTimer) {
+  process.stdout.write('\n');
+  console.log("Totals:");
+  this.logTimerHeader();
+  this.logTimer(totalTimer);
+  console.log('-------------------------');
+};
+
+// returns an Iterable of up from 0..N-1.
+var timesIt = function(count) {
+  var it = {};
+  it[Symbol.iterator] = function* () {
+    var i = 0;
+    while (i < count) {
+      yield i;
+      i++;
+    }
+  };
+  return it;
+};
+
+// Executes fn n times concurrently to produce promises and then returns a single Promise on the result of all promises.
+exports.pTimes = function (n, fn) {
+  return Promise.map(timesIt(n), function (i) { return fn(i); });
+};
+
+// Executes fn n times with concurrency of limit to produce promises and then returns a single Promise on the result of all promises.
+exports.pTimesLimit = function (n, limit, fn) {
+  return Promise.map(timesIt(n), function(i) { return fn(i); }, {concurrency: limit});
+};
+
+// Executes fn n times one at a time to produce promises and then returns a signle Promise on the result of all promises.
+exports.pTimesSeries = function (n, fn) {
+  return this.pTimesLimit(n, 1, fn);
 };
