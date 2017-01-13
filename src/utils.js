@@ -1,6 +1,9 @@
 'use strict';
 var fs = require('fs');
 var Promise = require('bluebird');
+var cassandra = require('cassandra-driver');
+
+function noop() {}
 
 exports.times = function times (n, f){
   var arr = new Array(n);
@@ -10,33 +13,32 @@ exports.times = function times (n, f){
   return arr;
 };
 
-exports.mean = function mean(arr) {
-  return (arr.reduce(function (p, v) { return p + v; }, 0) / arr.length);
-};
-
-exports.median = function median(arr) {
-  arr = arr.slice(0).sort();
-  var num = arr.length;
-  if (num % 2 !== 0) {
-    return arr[(num - 1) / 2];
+/**
+ * @param {Number} count
+ * @param {Function} iteratorFunc
+ * @param {Function} [callback]
+ */
+exports.aTimes = function (count, iteratorFunc, callback) {
+  callback = callback || noop;
+  count = +count;
+  if (isNaN(count) || count === 0) {
+    return callback();
   }
-  // even: return the average of the two middle values
-  var left = arr[num / 2 - 1];
-  var right = arr[num / 2];
-
-  return (left + right) / 2;
-};
-
-exports.min = function min(arr) {
-  if (!arr || arr.length === 0) {
-    throw new Error('No elements');
+  var completed = 0;
+  for (var i = 0; i < count; i++) {
+    iteratorFunc(i, next);
   }
-  return arr.reduce(function (prev, curr) {
-    if (curr < prev) {
-      return curr;
+  function next(err) {
+    if (err) {
+      var cb = callback;
+      callback = noop;
+      return cb(err);
     }
-    return prev;
-  }, 9007199254740991);
+    if (++completed !== count) {
+      return;
+    }
+    callback();
+  }
 };
 
 var parseOptions = exports.parseOptions = function parseOptions(optionNames, defaults) {
@@ -97,9 +99,11 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
   }, defaults));
 
   if (options.promiseFactoryName === 'bluebird') {
+    // eslint-disable-next-line global-require
     options.promiseFactory = require('bluebird').fromCallback;
   } else if (options.promiseFactoryName === 'q') {
     // wrap Q.nfcall.
+    // eslint-disable-next-line global-require
     var Q = require(options.promiseFactoryName);
     options.promiseFactory = function qFactory(handlerWrapper) {
       return Q.nfcall(handlerWrapper);
@@ -109,6 +113,22 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
     process.exit(-1);
   }
   return options;
+};
+
+/**
+ * Returns options to be passed to Client based on result of [parseCommonOptions].
+ */
+exports.connectOptions = function connectOptions() {
+  var options = this.parseCommonOptions();
+  return {
+    contactPoints: [ options.contactPoint || '127.0.0.1' ],
+    policies: { loadBalancing: new cassandra.policies.loadBalancing.DCAwareRoundRobinPolicy()},
+    socketOptions: { tcpNoDelay: true },
+    pooling: {
+      coreConnectionsPerHost: {'0': options.connectionsPerHost, '1': 1, '2': 0},
+      heartBeatInterval: 30000
+    }
+  };
 };
 
 /**
@@ -129,6 +149,7 @@ var extend = exports.extend = function (target) {
 exports.requireOptional = function (moduleName) {
   var result;
   try{
+    // eslint-disable-next-line global-require
     result = require(moduleName);
   }
   catch (e) {
@@ -190,6 +211,41 @@ exports.timesLimit = function (count, limit, iteratorFunc, callback) {
 };
 
 /**
+ * Similar to async.series(), but instead accumulating the result in an Array, it callbacks with the result of the last
+ * function in the array.
+ * @param {Array.<Function>} arr
+ * @param {Function} [callback]
+ */
+exports.series = function (arr, callback) {
+  if (!Array.isArray(arr)) {
+    throw new TypeError('First parameter must be an Array');
+  }
+  callback = callback || noop;
+  var index = 0;
+  var sync;
+  next();
+  function next(err, result) {
+    if (err) {
+      return callback(err);
+    }
+    if (index === arr.length) {
+      return callback(null, result);
+    }
+    if (sync) {
+      return process.nextTick(function () {
+        //noinspection JSUnusedAssignment
+        sync = true;
+        arr[index++](next);
+        sync = false;
+      });
+    }
+    sync = true;
+    arr[index++](next);
+    sync = false;
+  }
+};
+
+/**
  * @param {Number} count
  * @param {Function} iteratorFunction
  * @param {Function} callback
@@ -218,7 +274,7 @@ exports.logTimerHeader = function () {
 };
 
 exports.logTimer = function (timer) {
-  var percentiles = timer.percentiles([.25,.50,.75,.95,.98,.99,.999]);
+  var percentiles = timer.percentiles([0.25,0.50,0.75,0.95,0.98,0.99,0.999]);
   var mem = process.memoryUsage();
   console.log("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
     timer.min().toFixed(2),
@@ -247,17 +303,13 @@ exports.logTotals = function (totalTimer) {
   console.log('-------------------------');
 };
 
-// returns an Iterable of up from 0..N-1.
+// returns an array from 0..N-1.
 var timesIt = function(count) {
-  var it = {};
-  it[Symbol.iterator] = function* () {
-    var i = 0;
-    while (i < count) {
-      yield i;
-      i++;
-    }
-  };
-  return it;
+  var d = [];
+  for (var i = 0; i < count; i++) {
+    d.push(i);
+  }
+  return d;
 };
 
 // Executes fn n times concurrently to produce promises and then returns a single Promise on the result of all promises.
@@ -273,4 +325,28 @@ exports.pTimesLimit = function (n, limit, fn) {
 // Executes fn n times one at a time to produce promises and then returns a signle Promise on the result of all promises.
 exports.pTimesSeries = function (n, fn) {
   return this.pTimesLimit(n, 1, fn);
+};
+
+/**
+ * Initializes the killrvideo keyspace.
+ * 
+ * @param {Object} connectOptions options to connect with.
+ * @param {String} keyspace keyspace to initialize.
+ * @param {Function} callback to execute with on completion of schema init.
+ */
+exports.initSchema = function(connectOptions, keyspace, callback) {
+  var client = new cassandra.Client(connectOptions);
+  this.series([
+    client.connect.bind(client),
+    function (next) {
+      client.execute("DROP KEYSPACE IF EXISTS " + keyspace, next);
+    },
+    function (next) {
+      client.execute("CREATE KEYSPACE " + keyspace + " WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 }", next);
+    },
+    function (next) {
+      client.execute("CREATE TABLE " + keyspace + ".comments_by_video (videoid uuid, commentid timeuuid, userid uuid, comment text, PRIMARY KEY (videoid, commentid)) WITH CLUSTERING ORDER BY (commentid DESC)", next);
+    },
+    client.shutdown.bind(client)
+  ], callback);
 };

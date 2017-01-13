@@ -1,49 +1,48 @@
 'use strict';
 var cassandra = require('cassandra-driver');
 var assert = require('assert');
-var async = require('async');
 var metrics = require('metrics');
 var types = cassandra.types;
-var util = require('util');
 var utils = require('../src/utils');
 var currentMicros = utils.currentMicros;
 
 var options = utils.parseCommonOptions();
 
-var client = new cassandra.Client({
-  contactPoints: [ options.contactPoint || '127.0.0.1' ],
-  keyspace: options.keyspace || 'killrvideo',
-  policies: { loadBalancing: new cassandra.policies.loadBalancing.DCAwareRoundRobinPolicy()},
-  socketOptions: { tcpNoDelay: true },
-  pooling: {
-    coreConnectionsPerHost: {'0': options.connectionsPerHost, '1': 1, '2': 0},
-    heartBeatInterval: 30000
-  },
-  promiseFactory: options.promiseFactory
-});
-
+var keyspace = options.keyspace || 'killrvideo';
+var client = new cassandra.Client(utils.extend({ keyspace: keyspace }, utils.connectOptions()));
 var insertQuery = 'INSERT INTO comments_by_video (videoid, commentid, comment) VALUES (?, ?, ?)';
 var selectQuery = 'SELECT comment FROM comments_by_video WHERE videoid = ? and commentid = ?';
 var commentIds = utils.times(options.ops / 100, types.TimeUuid.now);
 var videoIds = utils.times(options.ops / 100, types.Uuid.random);
 var limit = options.outstanding;
 
-async.series([
+utils.series([
+  function initSchema(seriesNext) {
+    utils.initSchema(utils.connectOptions(), keyspace, seriesNext);
+  },
   client.connect.bind(client),
   function warmup(seriesNext) {
-    async.times(100, function (n, next) {
+    utils.aTimes(100, function (n, next) {
       var params = [types.Uuid.random(), types.TimeUuid.now(), 'hello!'];
       var selectParams = [params[0], params[1]];
-      async.series([
+      utils.series([
         function (warmupNext) {
           client.execute(insertQuery, params, { prepare: 1, consistency: types.consistencies.all})
-            .then(result => warmupNext(null, result))
-            .catch(err => warmupNext(err));
+            .then(function (result) { 
+              warmupNext(null, result);
+            })
+            .catch(function (err) {
+              warmupNext(err);
+            });
         },
         function (warmupNext) {
           client.execute(selectQuery, selectParams, { prepare: 1, consistency: types.consistencies.all})
-            .then(result => warmupNext(null, result))
-            .catch(err => warmupNext(err));
+            .then(function (result) {
+              warmupNext(null, result);
+            })
+            .catch(function (err) {
+              warmupNext(err);
+            });
         }
       ], next);
     }, function (err) {
@@ -64,13 +63,15 @@ async.series([
         var params = [videoIds[i % videoIdsLength], commentIds[(~~(i / 100)) % commentIdsLength], i.toString()];
         var queryStart = currentMicros();
         client.execute(insertQuery, params, { prepare: true, consistency: types.consistencies.any})
-          .then(() => {
+          .then(function () {
             var duration = currentMicros() - queryStart;
             seriesTimer.update(duration);
             totalTimer.update(duration);
             next(null);
           })
-          .catch(err => next(err));
+          .catch(function (err) {
+            next(err);
+          });
       }, function (err) {
         assert.ifError(err);
         utils.logTimer(seriesTimer);
@@ -84,21 +85,25 @@ async.series([
   },
   function select(seriesNext) {
     console.log('Select test');
+    var videoIdsLength = videoIds.length;
+    var commentIdsLength = commentIds.length;
     var totalTimer = new metrics.Timer();
     utils.logTimerHeader();
-    async.timesSeries(options.series, function (n, nextIteration) {
+    utils.timesSeries(options.series, function (n, nextIteration) {
       var seriesTimer = new metrics.Timer();
-      async.timesLimit(options.ops, limit, function (n, next) {
-        var params = [videoIds[n % 100], commentIds[(~~(n / 100)) % 100]];
+      utils.timesLimit(options.ops, limit, function (n, next) {
+        var params = [videoIds[n % videoIdsLength], commentIds[(~~(n / 100)) % commentIdsLength]];
         var queryStart = currentMicros();
         client.execute(selectQuery, params, { prepare: true, consistency: types.consistencies.any})
-          .then(() => {
+          .then(function () {
             var duration = currentMicros() - queryStart;
             seriesTimer.update(duration);
             totalTimer.update(duration);
             next(null);
           })
-          .catch(err => next(err));
+          .catch(function (err) {
+            next(err);
+          });
       }, function (err) {
         assert.ifError(err);
         utils.logTimer(seriesTimer);
