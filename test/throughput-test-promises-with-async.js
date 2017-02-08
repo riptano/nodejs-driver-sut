@@ -27,10 +27,22 @@ utils.series([
       var selectParams = [params[0], params[1]];
       utils.series([
         function (warmupNext) {
-          client.execute(insertQuery, params, { prepare: 1, consistency: types.consistencies.all}, warmupNext);
+          client.execute(insertQuery, params, { prepare: 1, consistency: types.consistencies.all})
+            .then(function (result) { 
+              warmupNext(null, result);
+            })
+            .catch(function (err) {
+              warmupNext(err);
+            });
         },
         function (warmupNext) {
-          client.execute(selectQuery, selectParams, { prepare: 1, consistency: types.consistencies.all}, warmupNext);
+          client.execute(selectQuery, selectParams, { prepare: 1, consistency: types.consistencies.all})
+            .then(function (result) {
+              warmupNext(null, result);
+            })
+            .catch(function (err) {
+              warmupNext(err);
+            });
         }
       ], next);
     }, function (err) {
@@ -50,12 +62,16 @@ utils.series([
       utils.timesLimit(options.ops, limit, function (i, next) {
         var params = [videoIds[i % videoIdsLength], commentIds[(~~(i / 100)) % commentIdsLength], i.toString()];
         var queryStart = currentMicros();
-        client.execute(insertQuery, params, { prepare: true, consistency: types.consistencies.any}, function (err) {
-          var duration = currentMicros() - queryStart;
-          seriesTimer.update(duration);
-          totalTimer.update(duration);
-          next(err);
-        });
+        client.execute(insertQuery, params, { prepare: true, consistency: types.consistencies.any})
+          .then(function () {
+            var duration = currentMicros() - queryStart;
+            seriesTimer.update(duration);
+            totalTimer.update(duration);
+            next(null);
+          })
+          .catch(function (err) {
+            next(err);
+          });
       }, function (err) {
         assert.ifError(err);
         utils.logTimer(seriesTimer);
@@ -78,12 +94,16 @@ utils.series([
       utils.timesLimit(options.ops, limit, function (n, next) {
         var params = [videoIds[n % videoIdsLength], commentIds[(~~(n / 100)) % commentIdsLength]];
         var queryStart = currentMicros();
-        client.execute(selectQuery, params, { prepare: true, consistency: types.consistencies.any}, function (err) {
-          var duration = currentMicros() - queryStart;
-          seriesTimer.update(duration);
-          totalTimer.update(duration);
-          next(err);
-        });
+        client.execute(selectQuery, params, { prepare: true, consistency: types.consistencies.any})
+          .then(function () {
+            var duration = currentMicros() - queryStart;
+            seriesTimer.update(duration);
+            totalTimer.update(duration);
+            next(null);
+          })
+          .catch(function (err) {
+            next(err);
+          });
       }, function (err) {
         assert.ifError(err);
         utils.logTimer(seriesTimer);
