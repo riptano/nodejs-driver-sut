@@ -4,6 +4,8 @@ var Promise = require('bluebird');
 var cassandra = require('cassandra-driver');
 
 function noop() {}
+var logItemFormat = "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d";
+var logHeaderFormat = "min,25,50,75,95,98,99,99.9,max,mean,count,thrpt,rss,heapTotal,heapUsed";
 
 exports.times = function times (n, f){
   var arr = new Array(n);
@@ -67,9 +69,13 @@ var parseOptions = exports.parseOptions = function parseOptions(optionNames, def
   }
   Object.keys(defaults).forEach(function (name) {
     options[name] = options[name] || defaults[name];
-    if (typeof defaults[name] === 'number') {
+    var defaultTypeName = typeof defaults[name];
+    if (defaultTypeName === 'number') {
       // use the same type
       options[name] = parseFloat(options[name]);
+    }
+    else if (defaultTypeName === 'boolean') {
+      options[name] = (options[name] === 'true');
     }
   });
   return options;
@@ -89,13 +95,19 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
     's':  ['series', 'Number of series'],
     'o':  ['outstanding', 'Maximum amount of outstanding requests'],
     'f':  ['promiseFactoryName', 'Promise factory to use, options: [\'default\', \'bluebird\', \'q\']'],
+    'l':  [
+      'measureLatency', 'Determines it should measure latencies, options: [\'true\', \'false\'].' +
+      ' Default:\'false\''],
+    'd':  ['driverPackageName', 'The name of the driver package: [\'cassandra-driver\', \'dse-driver\']'],
     'h':  ['help', 'Displays the help']
   }, extend({
     outstanding: 256,
     connectionsPerHost: 1,
     ops: 100000,
     series: 10,
-    promiseFactoryName: 'default'
+    promiseFactoryName: 'default',
+    measureLatency: false,
+    driverPackageName: 'cassandra-driver'
   }, defaults));
 
   if (options.promiseFactoryName === 'bluebird') {
@@ -175,6 +187,7 @@ exports.outputTestHeader = function outputTestHeader(options) {
   console.log('- Max outstanding requests: %d', options.outstanding);
   console.log('- Operations per series: %d', options.ops);
   console.log('- Series count: %d', options.series);
+  console.log('- Measure latency: %s', options.measureLatency);
   console.log('- Promise factory: %s', options.promiseFactoryName);
   console.log('-----------------------------------------------------');
 };
@@ -246,6 +259,46 @@ exports.series = function (arr, callback) {
 };
 
 /**
+ * @param {Array} arr
+ * @param {Function} fn
+ * @param {Function} [callback]
+ */
+exports.eachSeries = function eachSeries(arr, fn, callback) {
+  if (!Array.isArray(arr)) {
+    throw new TypeError('First parameter is not an Array');
+  }
+  callback = callback || noop;
+  var length = arr.length;
+  if (length === 0) {
+    return callback();
+  }
+  var sync;
+  var index = 1;
+  fn(arr[0], next);
+  if (sync === undefined) {
+    sync = false;
+  }
+
+  function next(err) {
+    if (err) {
+      return callback(err);
+    }
+    if (index >= length) {
+      return callback();
+    }
+    if (sync === undefined) {
+      sync = true;
+    }
+    if (sync) {
+      return process.nextTick(function () {
+        fn(arr[index++], next);
+      });
+    }
+    fn(arr[index++], next);
+  }
+};
+
+/**
  * @param {Number} count
  * @param {Function} iteratorFunction
  * @param {Function} callback
@@ -270,13 +323,31 @@ exports.timesSeries = function timesSeries(count, iteratorFunction, callback) {
 };
 
 exports.logTimerHeader = function () {
-  console.log("min,25,50,75,95,98,99,99.9,max,mean,count,thrpt,rss,heapTotal,heapUsed");
+  console.log(logHeaderFormat);
 };
 
-exports.logTimer = function (timer) {
+exports.logTimer = function (timer, millis, start, count) {
+  var mem;
+  if (!timer) {
+    // Use process.hrtime()
+    if (millis === null) {
+      var elapsed = process.hrtime(start);
+      millis = elapsed[0] * 1000 + elapsed[1] / 1000000;
+    }
+    var meanRate = count * 1000 / millis;
+    mem = process.memoryUsage();
+    console.log(logItemFormat,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      count,
+      meanRate.toFixed(2),
+      (mem.rss / 1024.0 / 1024.0).toFixed(2),
+      (mem.heapTotal / 1024.0 / 1024.0).toFixed(2),
+      (mem.heapUsed / 1024.0 / 1024.0).toFixed(2));
+    return millis;
+  }
   var percentiles = timer.percentiles([0.25,0.50,0.75,0.95,0.98,0.99,0.999]);
-  var mem = process.memoryUsage();
-  console.log("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+  mem = process.memoryUsage();
+  console.log(logItemFormat,
     timer.min().toFixed(2),
     percentiles['0.25'].toFixed(2),
     percentiles['0.5'].toFixed(2),
@@ -295,11 +366,17 @@ exports.logTimer = function (timer) {
 };
 
 // Logs a final summary with the given timer.
-exports.logTotals = function (totalTimer) {
+exports.logTotals = function (totalTimer, elapsed, count) {
   process.stdout.write('\n');
   console.log("Totals:");
   this.logTimerHeader();
-  this.logTimer(totalTimer);
+  if (totalTimer) {
+    this.logTimer(totalTimer);
+  }
+  else {
+    var totalElapsed = elapsed.reduce(function (p, v) { return p + v; }, 0);
+    this.logTimer(null, totalElapsed, null, count);
+  }
   console.log('-------------------------');
 };
 
