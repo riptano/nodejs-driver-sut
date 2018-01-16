@@ -3,6 +3,9 @@ var fs = require('fs');
 var Promise = require('bluebird');
 var cassandra = require('cassandra-driver');
 
+
+var driverVersion = JSON.parse(fs.readFileSync('node_modules/cassandra-driver/package.json', 'utf8')).version;
+
 function noop() {}
 var logItemFormat = "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d";
 var logHeaderFormat = "min,25,50,75,95,98,99,99.9,max,mean,count,thrpt,rss,heapTotal,heapUsed";
@@ -83,7 +86,7 @@ var parseOptions = exports.parseOptions = function parseOptions(optionNames, def
 
 /**
  * @param defaults
- * @returns {{contactPoint: String|undefined, keyspace: String|undefined, outstanding: Number, ops: Number,
+ * @returns {{contactPoint: String|undefined, keyspace: String|undefined, outstanding: Number, ops: Number, 
  *  series: Number, connectionsPerHost: Number}}
  */
 exports.parseCommonOptions = function parseCommonOptions(defaults) {
@@ -99,6 +102,10 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
       'measureLatency', 'Determines it should measure latencies, options: [\'true\', \'false\'].' +
       ' Default:\'false\''],
     'd':  ['driverPackageName', 'The name of the driver package: [\'cassandra-driver\', \'dse-driver\']'],
+    'g':  ['graphiteHost', 'Graphite host address'],
+    'gP':  ['graphitePort', 'Graphite server port'],
+    'gPrefix':  ['graphitePrefix', 'Graphite server port'],
+    'b' : ['basetime', 'Basetime to report'],
     'h':  ['help', 'Displays the help']
   }, extend({
     outstanding: 256,
@@ -107,7 +114,11 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
     series: 10,
     promiseFactoryName: 'default',
     measureLatency: false,
-    driverPackageName: 'cassandra-driver'
+    driverPackageName: 'cassandra-driver',
+    graphiteHost: '10.200.180.116',
+    graphitePort: 2003,
+    graphitePrefix: driverVersion,
+    basetime: undefined
   }, defaults));
 
   if (options.promiseFactoryName === 'bluebird') {
@@ -181,7 +192,6 @@ exports.currentMicros = function() {
 exports.outputTestHeader = function outputTestHeader(options) {
   console.log('-----------------------------------------------------');
   console.log('Using:');
-  var driverVersion = JSON.parse(fs.readFileSync('node_modules/cassandra-driver/package.json', 'utf8')).version;
   console.log('- Driver v%s', driverVersion);
   console.log('- Connections per hosts: %d', options.connectionsPerHost);
   console.log('- Max outstanding requests: %d', options.outstanding);

@@ -24,4 +24,4 @@ workload
     b.writeInt32BE(n, 0, true);
     client.execute(selectQuery, [ b ], { prepare: true }, callback);
   })
-  .run();
+  .run({debug: true});
