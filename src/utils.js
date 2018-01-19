@@ -95,6 +95,7 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
     'ks': ['keyspace', 'Keyspace name'],
     'p':  ['connectionsPerHost', 'Number of connections per host'],
     'r':  ['ops', 'Number of requests per series'],
+    't':  ['seconds', 'Number of seconds to execute per series'],
     's':  ['series', 'Number of series'],
     'o':  ['outstanding', 'Maximum amount of outstanding requests'],
     'f':  ['promiseFactoryName', 'Promise factory to use, options: [\'default\', \'bluebird\', \'q\']'],
@@ -230,6 +231,41 @@ exports.timesLimit = function (count, limit, iteratorFunc, callback) {
       return;
     }
     iteratorFunc(index, next);
+  }
+};
+
+/**
+ * @param {Number} seconds
+ * @param {Number} limit
+ * @param {Function} iteratorFunc
+ * @param {Function} [callback]
+ */
+exports.timeInSecondsLimit = function (seconds, limit, iteratorFunc, callback) {
+  callback = callback || noop;
+  var requested = 0;
+  var completed = 0;
+  var timeout = false;
+  setTimeout(function() {
+    timeout = true;
+  }, seconds * 1000);
+  for (var i = 0; i < limit; i++) {
+    iteratorFunc(requested++, next);
+  }
+  function next(err) {
+    if (err) {
+      var cb = callback;
+      callback = noop;
+      cb(err);
+      return;
+    }
+    completed++;
+    if (timeout) {
+      if (completed === requested) {
+        return callback();
+      }
+      return;
+    }
+    iteratorFunc(requested++, next);
   }
 };
 

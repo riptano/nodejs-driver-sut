@@ -6,6 +6,7 @@ var metrics = require('metrics');
 var perfmetrics = require('../perfmetrics');
 var util = require('util');
 var LinkedList = require('linkedlist');
+const Histogram = require('native-hdr-histogram');
 
 var warmupLength = 256;
 
@@ -126,34 +127,17 @@ ClientWorkload.prototype._runWorkloadItems = function (callback) {
   var currentTime = (new Date()).getTime();
   var baseTime = options.basetime || currentTime;
   utils.eachSeries(this._items, function (item, next) {
+    const histogram = new Histogram(1, 500);
     // Error Counter
     var errorCounterInc = 0;
     // Request counter
     var requestCounterInc = 0;
-    // Request latencies
-    var requestLatenciesList = new LinkedList(); //Using LinkedList for fast push
-    // Request latencies snapshot
-    var requestTimerSnapshotList = new LinkedList(); //Using LinkedList for fast push
-    // Definition of the metrics name path at graphite server
-    // graphite metrics name: nodejs.<driver version>.<workload>.<outstanding requests>
-    var reportPrefix = util.format('drivers.nodejs.%s.%s.%s',
-              options.graphitePrefix.replace(new RegExp('\\.', 'g'), '_'),
-              self._name,
-              options.outstanding);
     console.log('---  %s / %s  ---', self._name, item.name);
-    var takeSnapshot = function() {
-      requestTimerSnapshotList.push({
-        timestamp: (new Date).getTime(), 
-        counter: requestCounterInc,
-        errCounter : errorCounterInc
-      });
-    }
-
     var handler = function latencyTrackerHandler(n, timesNext) {
       var queryStart = currentMicros();
       item.fn(self._client, n, function (err) {
         var duration = currentMicros() - queryStart;
-        requestLatenciesList.push(duration);
+        histogram.record(duration);
         requestCounterInc++;
         if (err) {
           errorCounterInc++;
@@ -162,56 +146,37 @@ ClientWorkload.prototype._runWorkloadItems = function (callback) {
       });
     };
     
-    var snapshotInterval;
-    // Record the snapshot of metrics every 250ms to later report.
-    // Start to take snapshots after 250ms of starting tests.
-    // This frequency must the careful chosen to no impact too much on results
-    setTimeout(function() {
-      snapshotInterval = setInterval(takeSnapshot, 250);
-    }, 500);
+    var iteratorFunction = utils.timesLimit;
+    var duration = options.ops;
+    if (options.seconds) {
+      iteratorFunction = utils.timeInSecondsLimit;
+      duration = options.seconds;
+    }
 
-    var testStart = (new Date).getTime();
-    utils.timesLimit(options.ops, options.outstanding, handler, function (err) {
+    var localMemRecorder = new perfmetrics.LocalMemRecorder(baseTime);
+    // Record the snapshot of metrics every 500ms to later report.
+    // This frequency must the careful chosen to no impact too much on results
+    var takeSnapshot = function () {
+      localMemRecorder.record(requestCounterInc, errorCounterInc, histogram);
+    };
+    var testStart = localMemRecorder.start(takeSnapshot, 500);
+    iteratorFunction(duration, options.outstanding, handler, function (err) {
       takeSnapshot();
-      clearInterval(snapshotInterval);
-      var testStop = (new Date).getTime();
-      self._logMessage('Finished run: %s', item._name);
-      var metricsReport = new metrics.Report();
-      var requestTimer = new perfmetrics.Timer(testStart, testStop);
-      var errMeter = new perfmetrics.Meter(testStart, testStop);
-      metricsReport.addMetric(item.name + '.requests', requestTimer);
-      metricsReport.addMetric(item.name + '.errors', errMeter);
-      self._logMessage('Created metrics');
-      // Use a local memory reporter to not let the communication with graphite server
-      // impact on test results : throughput
-      var localMemReporter = new perfmetrics.LocalMemReporter(metricsReport, reportPrefix, baseTime);
-      var lastIndex = 0;
-      while (requestTimerSnapshotList.length) {
-        var snapshot = requestTimerSnapshotList.shift();
-        var timestamp = snapshot.timestamp;
-        var counter = snapshot.counter;
-        var errCounter = snapshot.errCounter;
-        var latenciesCounterIndex = counter;
-        for(var k = lastIndex; k < latenciesCounterIndex; k++) {
-          requestTimer.update(requestLatenciesList.shift());
-        }
-        lastIndex = latenciesCounterIndex;
-        requestTimer.setStopTime(timestamp);
-        if (errCounter > 0) {
-          errMeter.mark(errCounter);
-        }
-        if (options.graphiteHost) {
-          localMemReporter.report(timestamp / 1000);
-        }
-      }
-      localMemReporter.reportConsole(timestamp);
+      localMemRecorder.stop();
+      localMemRecorder.reportConsole();
       if (options.graphiteHost) {
-        localMemReporter.reportGraphite(options.graphiteHost, options.graphitePort, function() {
+        // Definition of the metrics name path at graphite server
+        // graphite metrics name: nodejs.<driver version>.<workload>.<outstanding requests>
+        var reportPrefix = util.format('drivers.nodejs.%s.%s.%s',
+                  options.graphitePrefix.replace(new RegExp('\\.', 'g'), '_'),
+                  self._name,
+                  options.outstanding);
+        localMemRecorder.reportGraphite(options.graphiteHost, options.graphitePort, reportPrefix, item.name, function() {
           self._logMessage('Successfully reported to graphite');
           next(null);
         });
       } else {
-        next(err);
+        next(null);
       }
     });
   }, function(err) {

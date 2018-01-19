@@ -1,4 +1,4 @@
 'use strict';
-exports.LocalMemReporter = require('./local-mem-reporter');
+exports.LocalMemRecorder = require('./local-mem-recorder');
 exports.Timer = require('./timer');
 exports.Meter = require('./meter');
