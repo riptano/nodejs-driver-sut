@@ -5,6 +5,8 @@ var EventEmitter = require('events').EventEmitter;
 var Histogram = require('native-hdr-histogram');
 var LinkedList = require('linkedlist');
 
+var reconnecting = false;
+
 /**
  * A custom reporter that stores the graphite metrics locally.
  * @param {String} baseTime A timestamp to be used as base to report
@@ -53,7 +55,7 @@ LocalMemRecorder.prototype.record = function(counter, errorCounter, histogram) {
   });  
 };
 
-LocalMemRecorder.prototype.reportGraphite = function(host, port, prefix, itemName, callback) {
+LocalMemRecorder.prototype.reportGraphite = function(host, port, prefix, callback) {
   var self = this;
   this.socket = new Socket();
   this.socket.on('error', function(exc) {
@@ -62,7 +64,7 @@ LocalMemRecorder.prototype.reportGraphite = function(host, port, prefix, itemNam
       self.emit('log', 'warn', util.format('Lost connection to %s. Will reconnect in 10 seconds.', host), exc);
       setTimeout(function () {
         reconnecting = false;
-        self.reportGraphite(host, port, callback);
+        self.reportGraphite(host, port, prefix, callback);
       }, 1000);
     }
   });
@@ -71,8 +73,8 @@ LocalMemRecorder.prototype.reportGraphite = function(host, port, prefix, itemNam
   this.socket.connect(port, host, function() {
     self.emit('log', 'verbose', util.format('Successfully connected to graphite @ %s:%d.', host, port));
     self.emit('log', 'verbose', util.format('Attempt to send %d metrics records to graphite @ %s:%d.', self.localSnapshots.length, host, port));
-    var requestMetricName = itemName + '.requests';
-    var errorMetricName = itemName + '.errors';
+    var requestMetricName = 'requests';
+    var errorMetricName = 'errors';
     while (self.localSnapshots.length) {
       var snapshot = self.localSnapshots.shift();
       var timestampToReport = (snapshot.timestamp / 1000) - self.timeshift;

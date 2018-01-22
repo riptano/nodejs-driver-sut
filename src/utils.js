@@ -2,7 +2,8 @@
 var fs = require('fs');
 var Promise = require('bluebird');
 var cassandra = require('cassandra-driver');
-
+var NanoTimer = require('nanotimer');
+var util = require('util');
 
 var driverVersion = JSON.parse(fs.readFileSync('node_modules/cassandra-driver/package.json', 'utf8')).version;
 
@@ -105,8 +106,11 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
     'd':  ['driverPackageName', 'The name of the driver package: [\'cassandra-driver\', \'dse-driver\']'],
     'g':  ['graphiteHost', 'Graphite host address'],
     'gP':  ['graphitePort', 'Graphite server port'],
-    'gPrefix':  ['graphitePrefix', 'Graphite server port'],
+    'v':  ['driverVersion', 'Driver version or Id'],
+    'db':  ['database', 'Database and version used: cassandra_3.0|dse_6.0|simulacron'],
+    'n':  ['nodes', 'Number of nodes on database cluster'],
     'b' : ['basetime', 'Basetime to report'],
+    'x' : ['rate', 'Type of test: max or fixed (ops/s). If fixed rate, the \'outstanding\' will be the number of requests per second'],
     'h':  ['help', 'Displays the help']
   }, extend({
     outstanding: 256,
@@ -118,8 +122,9 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
     driverPackageName: 'cassandra-driver',
     graphiteHost: '10.200.180.116',
     graphitePort: 2003,
-    graphitePrefix: driverVersion,
-    basetime: undefined
+    database: 'cassandra_3.0',
+    nodes: 3,
+    rate: 'max'
   }, defaults));
 
   if (options.promiseFactoryName === 'bluebird') {
@@ -136,6 +141,11 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
     console.error("Got unknown promise factory for option '-f': %s", options.promiseFactoryName);
     process.exit(-1);
   }
+
+  if (options.driverVersion === undefined) {
+    options.driverVersion = JSON.parse(fs.readFileSync('node_modules/' + options.driverPackageName + '/package.json', 'utf8')).version;
+  }
+
   return options;
 };
 
@@ -242,15 +252,18 @@ exports.timesLimit = function (count, limit, iteratorFunc, callback) {
  */
 exports.timeInSecondsLimit = function (seconds, limit, iteratorFunc, callback) {
   callback = callback || noop;
+  var timer = new NanoTimer();
   var requested = 0;
   var completed = 0;
-  var timeout = false;
-  setTimeout(function() {
-    timeout = true;
-  }, seconds * 1000);
+  var finishExecutions = false;
   for (var i = 0; i < limit; i++) {
     iteratorFunc(requested++, next);
   }
+  //stop execution after n nanoseconds
+  timer.setTimeout(function() {
+    finishExecutions = true;
+  }, '', util.format('%sn', (seconds * 1000000000)));
+
   function next(err) {
     if (err) {
       var cb = callback;
@@ -259,13 +272,55 @@ exports.timeInSecondsLimit = function (seconds, limit, iteratorFunc, callback) {
       return;
     }
     completed++;
-    if (timeout) {
+    if (finishExecutions) {
       if (completed === requested) {
         return callback();
       }
       return;
     }
     iteratorFunc(requested++, next);
+  }
+};
+
+/**
+ * @param {Number} seconds
+ * @param {Number} rate
+ * @param {Function} iteratorFunc
+ * @param {Function} [callback]
+ */
+exports.timeInSecondsFixedRate = function (seconds, rate, iteratorFunc, callback) {
+  callback = callback || noop;
+  var timer = new NanoTimer();
+  var requested = 0;
+  var completed = 0;
+  var finishExecutions = false;
+  // calculate rate using nanoseconds precision
+  var requestDelay = (1 / rate) * 1000000000;
+  timer.setInterval(function() {
+    iteratorFunc(requested++, next);
+  }, '', util.format('%sn', requestDelay));
+
+  //stop execution after n nanoseconds
+  timer.setTimeout(function() {
+    console.log('timeout requestDelay ' + requestDelay);
+    finishExecutions = true;
+    timer.clearInterval();
+  }, '', util.format('%sn', (seconds * 1000000000)));
+  function next(err) {
+    if (err) {
+      var cb = callback;
+      callback = noop;
+      timer.clearInterval();
+      cb(err);
+      return;
+    }
+    completed++;
+    if (finishExecutions) {
+      if (completed === requested) {
+        return callback();
+      }
+      return;
+    }
   }
 };
 

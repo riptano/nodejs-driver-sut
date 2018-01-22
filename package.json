@@ -10,6 +10,7 @@
     "fast-stats": "^0.0.3",
     "linkedlist": "^1.0.1",
     "metrics": "^0.1.14",
+    "nanotimer": "^0.3.15",
     "native-hdr-histogram": "^0.4.6",
     "q": "^1.4.1"
   },

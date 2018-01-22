@@ -152,6 +152,10 @@ ClientWorkload.prototype._runWorkloadItems = function (callback) {
       iteratorFunction = utils.timeInSecondsLimit;
       duration = options.seconds;
     }
+    if (options.rate === 'fixed') {
+      iteratorFunction = utils.timeInSecondsFixedRate;
+      duration = options.seconds;
+    }
 
     var localMemRecorder = new perfmetrics.LocalMemRecorder(baseTime);
     // Record the snapshot of metrics every 500ms to later report.
@@ -166,12 +170,18 @@ ClientWorkload.prototype._runWorkloadItems = function (callback) {
       localMemRecorder.reportConsole();
       if (options.graphiteHost) {
         // Definition of the metrics name path at graphite server
-        // graphite metrics name: nodejs.<driver version>.<workload>.<outstanding requests>
-        var reportPrefix = util.format('drivers.nodejs.%s.%s.%s',
-                  options.graphitePrefix.replace(new RegExp('\\.', 'g'), '_'),
+        // graphite metrics name: drivers.nodejs.<driverpackagename>.<driver version>.<workload>.<requesttype>.<db>.<nodes>.<rate>.<outstanding requests>
+        var reportPrefix = util.format('drivers.nodejs.%s.%s.%s.%s.%s.%s.%s.%s',
+                  (options.driverPackageName === 'cassandra-driver' ? 'oss' : 'dse'),
+                  options.driverVersion.replace(new RegExp('\\.', 'g'), '_'),
                   self._name,
+                  item.name,
+                  options.database.replace(new RegExp('\\.', 'g'), '_'),
+                  options.nodes,
+                  options.rate,
                   options.outstanding);
-        localMemRecorder.reportGraphite(options.graphiteHost, options.graphitePort, reportPrefix, item.name, function() {
+        console.log('prefix: ' + reportPrefix);
+        localMemRecorder.reportGraphite(options.graphiteHost, options.graphitePort, reportPrefix, function() {
           self._logMessage('Successfully reported to graphite');
           next(null);
         });
