@@ -205,10 +205,19 @@ exports.outputTestHeader = function outputTestHeader(options) {
   console.log('Using:');
   console.log('- Driver v%s', driverVersion);
   console.log('- Connections per hosts: %d', options.connectionsPerHost);
-  console.log('- Max outstanding requests: %d', options.outstanding);
-  console.log('- Operations per series: %d', options.ops);
-  console.log('- Series count: %d', options.series);
-  console.log('- Measure latency: %s', options.measureLatency);
+  if (options.rate === 'max') {
+    console.log('- Max outstanding requests: %d', options.outstanding);
+  } else {
+    console.log('- Fixed request rate (ops/second): %d', options.outstanding);
+  }
+  if (options.seconds) {
+    console.log('- Duration of test: %d', options.seconds);
+  } else {
+    console.log('- Operations: %d', options.ops);
+  }
+  console.log('- Database: %s', options.database);
+  console.log('- Cluster nodes: %s', options.nodes);
+  console.log('- Basetime: %s ( %s )', options.basetime);
   console.log('- Promise factory: %s', options.promiseFactoryName);
   console.log('-----------------------------------------------------');
 };

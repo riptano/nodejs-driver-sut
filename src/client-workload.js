@@ -163,7 +163,8 @@ ClientWorkload.prototype._runWorkloadItems = function (callback) {
     var takeSnapshot = function () {
       localMemRecorder.record(requestCounterInc, errorCounterInc, histogram);
     };
-    var testStart = localMemRecorder.start(takeSnapshot, 500);
+    //as graphite store the data using seconds since unix epoch time, do not make sense to retrieve a lower interval
+    var testStart = localMemRecorder.start(takeSnapshot, 1000);
     iteratorFunction(duration, options.outstanding, handler, function (err) {
       takeSnapshot();
       localMemRecorder.stop();
