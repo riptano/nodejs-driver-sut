@@ -3,6 +3,7 @@
 const fs = require('fs');
 const hdr = require('hdr-histogram-js');
 const clientFactory = require('../src/client-factory');
+const dse = require('dse-driver');
 
 const iterations = 5000;
 const timesPerIteration = 200;
@@ -15,10 +16,15 @@ const histogram = hdr.build({
 });
 
 async function startBenchmark(client, workload) {
-  console.log(`Getting started using hosts: ${client.hosts.values().map(h => h.address)}`);
+  console.log(`Starting using hosts: ${client.hosts.values().map(h => h.address)}`);
 
   await workload.init();
+
   await workload.warmup();
+
+  console.log(client.getState().toString());
+
+  console.log('Warmup finished, start scheduling');
 
   let firstError;
   let iterationCounter = 0;
@@ -43,7 +49,7 @@ async function startBenchmark(client, workload) {
 }
 
 function finish(client) {
-  console.log('Finished');
+  console.log('Execution finished, saving output file');
 
   const output = histogram.outputPercentileDistribution();
   fs.writeFileSync('latency.txt', output);
@@ -53,7 +59,8 @@ function finish(client) {
 
 clientFactory
   .createAndConnect()
-  .then(client => startBenchmark(client, new MixedWorkload(client, histogram, 1)));
+  .then(client => startBenchmark(client, new MixedWorkload(client, histogram, 3)));
+
 
 class BasicWorkload {
   constructor(client, histogram) {
@@ -89,8 +96,14 @@ class MixedWorkload {
     this.replicationFactor = replicationFactor;
     this.insertQuery = 'INSERT INTO standard1 (key, c0, c1) VALUES (?, ?, ?)';
     this.selectQuery = 'SELECT c0 FROM standard1 WHERE key = ?';
-    this.queryOptions = { prepare: true };
     this.executeIndex = 0;
+
+    this.queryOptions = {
+      prepare: true,
+      consistency: replicationFactor >= 3
+        ? dse.types.consistencies.localQuorum
+        : dse.types.consistencies.localOne
+    };
   }
 
   async init() {
