@@ -5,8 +5,8 @@ const hdr = require('hdr-histogram-js');
 const clientFactory = require('../src/client-factory');
 const dse = require('dse-driver');
 
-const iterations = 5000;
-const timesPerIteration = 200;
+const iterations = 20000;
+const timesPerIteration = 50;
 const delay = 20;
 
 const histogram = hdr.build({
@@ -59,7 +59,14 @@ function finish(client) {
 
 clientFactory
   .createAndConnect()
-  .then(client => startBenchmark(client, new MixedWorkload(client, histogram, 3)));
+  .then(client => {
+    client.on('hostDown', host => console.log(`-----Host ${host.address} is considered DOWN-----`));
+    client.on('hostUp', host => console.log(`-----Host ${host.address} is considered back UP-----`));
+
+    setInterval(() => console.log(client.getState().toString()), 10000);
+
+    return startBenchmark(client, new MixedWorkload(client, histogram, 3));
+  });
 
 
 class BasicWorkload {
@@ -100,6 +107,7 @@ class MixedWorkload {
 
     this.queryOptions = {
       prepare: true,
+      isIdempotent: true,
       consistency: replicationFactor >= 3
         ? dse.types.consistencies.localQuorum
         : dse.types.consistencies.localOne
