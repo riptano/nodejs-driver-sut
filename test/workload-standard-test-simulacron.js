@@ -1,6 +1,6 @@
 'use strict';
 
-var ClientWorkload = require('../src/client-workload');
+var ClientWorkload = require('../src/throttled-client-workload');
 
 var insertQuery = "INSERT INTO standard1 (key, c0, c1, c2, c3, c4) VALUES (?, ?, ?, ?, ?, ?)";
 var selectQuery = "SELECT key, c0, c1, c2, c3, c4 FROM standard1 WHERE key = ?";

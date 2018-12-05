@@ -117,46 +117,60 @@ ClientWorkload.prototype._warmup = function (callback) {
 ClientWorkload.prototype._runWorkloadItems = function (callback) {
   this._logMessage('Running %d workload items');
   var options = this._commandLineOptions;
-  var self = this;
-  utils.eachSeries(this._items, function (item, next) {
-    var totalTimer;
-    console.log('---  %s / %s  ---', self._name, item.name);
-    if (self._commandLineOptions.measureLatency) {
+  utils.eachSeries(this._items, (item, next) => {
+    let totalTimer;
+    console.log('---  %s / %s  ---', this._name, item.name);
+    if (this._commandLineOptions.measureLatency) {
       totalTimer = new metrics.Timer();
     }
     utils.logTimerHeader();
-    var elapsed = [];
-    utils.timesSeries(options.series, function (n, nextIteration) {
-      var handler;
-      var seriesTimer;
-      var start;
-      if (self._commandLineOptions.measureLatency) {
-        seriesTimer = new metrics.Timer();
-        handler = function latencyTrackerHandler(n, timesNext) {
-          var queryStart = currentMicros();
-          item.fn(self._client, n, function (err) {
-            var duration = currentMicros() - queryStart;
-            seriesTimer.update(duration);
-            totalTimer.update(duration);
-            timesNext(err);
-          });
-        };
+    let handler;
+    let seriesTimer;
+    let intervalCount = 0;
+    if (this._commandLineOptions.measureLatency) {
+      seriesTimer = new metrics.Timer();
+      handler = (n, timesNext) => {
+        var queryStart = currentMicros();
+        item.fn(this._client, n, function (err) {
+          var duration = currentMicros() - queryStart;
+          seriesTimer.update(duration);
+          totalTimer.update(duration);
+          timesNext(err);
+        });
+      };
+    }
+    else {
+      handler = (n, timesNext) => {
+        item.fn(this._client, n, function (err) {
+          intervalCount++;
+          timesNext(err);
+        });
+      };
+    }
+
+    let lastTotalCount = 0;
+    let start = process.hrtime();
+    const onInterval = () => {
+      if (totalTimer) {
+        intervalCount = totalTimer.count() - lastTotalCount;
+        lastTotalCount = totalTimer.count();
       }
-      else {
-        handler = function latencyTrackerHandler(n, timesNext) {
-          item.fn(self._client, n, timesNext);
-        };
+      utils.logTimer(seriesTimer, null, null, intervalCount);
+      intervalCount = 0;
+      if (seriesTimer) {
+        seriesTimer.clear();
       }
-      start = process.hrtime();
-      utils.timesLimit(options.ops, options.outstanding, handler, function (err) {
-        elapsed.push(utils.logTimer(seriesTimer, null, start, options.ops));
-        nextIteration(err);
-      });
-    }, function (err) {
-      utils.logTotals(totalTimer, elapsed, options.ops * options.series);
+    };
+
+    utils.timesPerSec(options.ops, options.outstanding, options.throttle, handler, onInterval, (err) => {
+      const elapsed = process.hrtime(start);
+      const millis = elapsed[0] * 1000 + elapsed[1] / 1000000;
+      utils.logTotals(totalTimer, millis, options.ops);
       next(err);
     });
-  }, callback);
+  }, (err) => {
+    callback(err);
+  });
 };
 
 module.exports = ClientWorkload;

@@ -414,9 +414,11 @@ exports.logTimer = function (timer, millis, start, count) {
   // if start or elapsed is set calculate rate. 
   // otherwise assume count encompasses responses in 1 second interval.
   if (millis || start) {
-    if (millis === null) {
+    if (!millis) {
       const elapsed = process.hrtime(start);
       millis = elapsed[0] * 1000 + elapsed[1] / 1000000;
+    } else if (Array.isArray(millis)) {
+      millis = millis.reduce(function (p, v) { return p + v; }, 0);
     }
     meanRate = count * 1000 / millis;
   }
@@ -429,7 +431,7 @@ exports.logTimer = function (timer, millis, start, count) {
       (mem.rss / 1024.0 / 1024.0).toFixed(2),
       (mem.heapTotal / 1024.0 / 1024.0).toFixed(2),
       (mem.heapUsed / 1024.0 / 1024.0).toFixed(2)));
-      return;
+      return millis;
   }
 
   var percentiles = timer.percentiles([0.25,0.50,0.75,0.95,0.98,0.99,0.999]);
@@ -449,6 +451,7 @@ exports.logTimer = function (timer, millis, start, count) {
     (mem.rss / 1024.0 / 1024.0).toFixed(2),
     (mem.heapTotal / 1024.0 / 1024.0).toFixed(2),
     (mem.heapUsed / 1024.0 / 1024.0).toFixed(2)));
+  return millis;
 };
 
 // Logs a final summary with the given timer.
