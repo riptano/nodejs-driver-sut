@@ -151,12 +151,15 @@ ClientWorkload.prototype._runWorkloadItems = function (callback) {
     let lastTotalCount = 0;
     let start = process.hrtime();
     const onInterval = () => {
-      if (seriesTimer) {
-        intervalCount = seriesTimer.count() - lastTotalCount;
-        lastTotalCount = seriesTimer.count();
+      if (totalTimer) {
+        intervalCount = totalTimer.count() - lastTotalCount;
+        lastTotalCount = totalTimer.count();
       }
       utils.logTimer(seriesTimer, null, null, intervalCount);
-      intervalCount = 0; 
+      intervalCount = 0;
+      if (seriesTimer) {
+        seriesTimer.clear();
+      }
     };
 
     utils.timesPerSec(options.ops, options.outstanding, options.throttle, handler, onInterval, (err) => {
