@@ -2,10 +2,11 @@
 var fs = require('fs');
 var Promise = require('bluebird');
 var cassandra = require('cassandra-driver');
+const sprintf = require('sprintf-js').sprintf;
 
 function noop() {}
-var logItemFormat = "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d";
-var logHeaderFormat = "min,25,50,75,95,98,99,99.9,max,mean,count,thrpt,rss,heapTotal,heapUsed";
+var logItemFormat = "%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%9.2f,%9.2f,%9.2f,%9.2f";
+var logHeaderFormat = "    min,     25,     50,     75,     95,     98,     99,   99.9,    max,   mean,    thrpt,      rss,heapTotal, heapUsed";
 
 exports.times = function times (n, f){
   var arr = new Array(n);
@@ -94,6 +95,7 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
     'r':  ['ops', 'Number of requests per series'],
     's':  ['series', 'Number of series'],
     'o':  ['outstanding', 'Maximum amount of outstanding requests'],
+    't':  ['throttle', 'Maximum amount of requests to allow per second'],
     'f':  ['promiseFactoryName', 'Promise factory to use, options: [\'default\', \'bluebird\', \'q\']'],
     'l':  [
       'measureLatency', 'Determines it should measure latencies, options: [\'true\', \'false\'].' +
@@ -105,6 +107,7 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
     connectionsPerHost: 1,
     ops: 100000,
     series: 10,
+    throttle: 1000000,
     promiseFactoryName: 'default',
     measureLatency: false,
     driverPackageName: 'cassandra-driver'
@@ -134,6 +137,7 @@ exports.connectOptions = function connectOptions() {
   var options = this.parseCommonOptions();
   return {
     contactPoints: [ options.contactPoint || '127.0.0.1' ],
+    localDataCenter: 'dc1',
     policies: { loadBalancing: new cassandra.policies.loadBalancing.DCAwareRoundRobinPolicy()},
     socketOptions: { tcpNoDelay: true },
     pooling: {
@@ -185,6 +189,7 @@ exports.outputTestHeader = function outputTestHeader(options) {
   console.log('- Driver v%s', driverVersion);
   console.log('- Connections per hosts: %d', options.connectionsPerHost);
   console.log('- Max outstanding requests: %d', options.outstanding);
+  console.log('- Max requests per second: %d', options.throttle);
   console.log('- Operations per series: %d', options.ops);
   console.log('- Series count: %d', options.series);
   console.log('- Measure latency: %s', options.measureLatency);
@@ -220,6 +225,80 @@ exports.timesLimit = function (count, limit, iteratorFunc, callback) {
       return;
     }
     iteratorFunc(index, next);
+  }
+};
+
+
+exports.timesPerSec = function (count, limit, perSec, iteratorFunc, onInterval, callback) {
+  callback = callback || noop;
+  limit = Math.min(limit, count);
+  var index = limit - 1;
+  var completed = 0;
+  let queued = true;
+  let queuedIndex = index;
+  let queuedCount = 0;
+  let ceilOnInterval = Math.min(limit, perSec);
+  let submittedInSecond = ceilOnInterval;
+  for (var i = 0; i < ceilOnInterval; i++) {
+    iteratorFunc(i, next);
+  }
+
+  let done = false;
+  let finalErr = null;
+
+  const interval = setInterval(() => {
+    onInterval();
+    if (done) {
+      clearInterval(interval);
+      callback(finalErr);
+    }
+    let toSubmit;
+    if (queuedCount == 0) {
+      submittedInSecond = 0;
+      return;
+    }
+
+    if (queuedCount > ceilOnInterval) {
+      toSubmit = ceilOnInterval;
+    } else {
+      toSubmit = queuedCount;
+    }
+    queuedCount = 0;
+
+    let curIndex = queuedIndex;
+    submittedInSecond = toSubmit;
+    for (let i = 0; i < toSubmit; i++) {
+      iteratorFunc(curIndex++, next);
+    }
+  }, 1000);
+
+  function next(err) {
+    if (err) {
+      finalErr = err;
+      done = true;
+      return;
+    }
+    if (++completed === count) {
+      done = true;
+      return;
+    }
+    if (++index >= count) {
+      done = true;
+      return;
+    }
+
+    if (submittedInSecond < perSec) {
+      submittedInSecond += 1;
+      iteratorFunc(index, next);
+      return;
+    }
+
+    if (!queued) {
+      queued = true;
+    }
+    queuedIndex = index;
+    queuedCount++;
+    return;
   }
 };
 
@@ -328,26 +407,31 @@ exports.logTimerHeader = function () {
 
 exports.logTimer = function (timer, millis, start, count) {
   var mem;
-  if (!timer) {
-    // Use process.hrtime()
+  let meanRate = count;
+  // if start or elapsed is set calculate rate. 
+  // otherwise assume count encompasses responses in 1 second interval.
+  if (millis || start) {
     if (millis === null) {
-      var elapsed = process.hrtime(start);
+      const elapsed = process.hrtime(start);
       millis = elapsed[0] * 1000 + elapsed[1] / 1000000;
     }
-    var meanRate = count * 1000 / millis;
+    meanRate = count * 1000 / millis;
+  }
+  if (!timer) {
+    // Use process.hrtime()
     mem = process.memoryUsage();
-    console.log(logItemFormat,
+    console.log(sprintf(logItemFormat,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      count,
       meanRate.toFixed(2),
       (mem.rss / 1024.0 / 1024.0).toFixed(2),
       (mem.heapTotal / 1024.0 / 1024.0).toFixed(2),
-      (mem.heapUsed / 1024.0 / 1024.0).toFixed(2));
-    return millis;
+      (mem.heapUsed / 1024.0 / 1024.0).toFixed(2)));
+      return;
   }
+
   var percentiles = timer.percentiles([0.25,0.50,0.75,0.95,0.98,0.99,0.999]);
   mem = process.memoryUsage();
-  console.log(logItemFormat,
+  console.log(sprintf(logItemFormat,
     timer.min().toFixed(2),
     percentiles['0.25'].toFixed(2),
     percentiles['0.5'].toFixed(2),
@@ -358,11 +442,10 @@ exports.logTimer = function (timer, millis, start, count) {
     percentiles['0.999'].toFixed(2),
     timer.max().toFixed(2),
     timer.mean().toFixed(2),
-    timer.count(),
-    timer.meanRate().toFixed(2),
+    meanRate.toFixed(2),
     (mem.rss / 1024.0 / 1024.0).toFixed(2),
     (mem.heapTotal / 1024.0 / 1024.0).toFixed(2),
-    (mem.heapUsed / 1024.0 / 1024.0).toFixed(2));
+    (mem.heapUsed / 1024.0 / 1024.0).toFixed(2)));
 };
 
 // Logs a final summary with the given timer.
@@ -371,12 +454,13 @@ exports.logTotals = function (totalTimer, elapsed, count) {
   console.log("Totals:");
   this.logTimerHeader();
   if (totalTimer) {
-    this.logTimer(totalTimer);
+    this.logTimer(totalTimer, elapsed, null, count);
   }
   else {
-    var totalElapsed = elapsed.reduce(function (p, v) { return p + v; }, 0);
-    this.logTimer(null, totalElapsed, null, count);
+    this.logTimer(null, elapsed, null, count);
   }
+  console.log();
+  console.log("Operations: ", count);
   console.log('-------------------------');
 };
 
