@@ -260,16 +260,19 @@ exports.timesPerSec = function (count, limit, perSec, iteratorFunc, onInterval, 
 
     if (queuedCount > ceilOnInterval) {
       toSubmit = ceilOnInterval;
+      queuedCount -= ceilOnInterval;
     } else {
       toSubmit = queuedCount;
+      queuedCount = 0;
+      queued = false;
     }
-    queuedCount = 0;
 
     let curIndex = queuedIndex;
     submittedInSecond = toSubmit;
     for (let i = 0; i < toSubmit; i++) {
       iteratorFunc(curIndex++, next);
     }
+    queuedIndex = curIndex;
   }, 1000);
 
   function next(err) {
@@ -295,8 +298,8 @@ exports.timesPerSec = function (count, limit, perSec, iteratorFunc, onInterval, 
 
     if (!queued) {
       queued = true;
+      queuedIndex = index;
     }
-    queuedIndex = index;
     queuedCount++;
     return;
   }
