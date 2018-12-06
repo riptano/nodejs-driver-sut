@@ -8,6 +8,9 @@ function noop() {}
 var logItemFormat = "%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%9.2f,%9.2f,%9.2f,%9.2f";
 var logHeaderFormat = "    min,     25,     50,     75,     95,     98,     99,   99.9,    max,   mean,    thrpt,      rss,heapTotal, heapUsed";
 
+var logTargetFormat = "%4d,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%7.2f,%9.2f";
+var logTargetHeaderFormat = "   c,    min,     25,     50,     75,     95,     98,     99,   99.9,    max,   mean,    thrpt";
+
 exports.times = function times (n, f){
   var arr = new Array(n);
   for (var i = 0; i < n; i++) {
@@ -92,8 +95,10 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
     'c':  ['contactPoint', 'Cassandra contact point'],
     'ks': ['keyspace', 'Keyspace name'],
     'p':  ['connectionsPerHost', 'Number of connections per host'],
-    'r':  ['ops', 'Number of requests per series'],
+    'r':  ['ops', 'Max number of requests per series'],
     's':  ['series', 'Number of series'],
+    'ob':  ['outstandingBase', 'Base number of outstanding requests, only used running with stepped'],
+    'os': ['outstandingStep', 'Number of requests to increase per step'],
     'o':  ['outstanding', 'Maximum amount of outstanding requests'],
     't':  ['throttle', 'Maximum amount of requests to allow per second'],
     'f':  ['promiseFactoryName', 'Promise factory to use, options: [\'default\', \'bluebird\', \'q\']'],
@@ -104,6 +109,8 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
     'h':  ['help', 'Displays the help']
   }, extend({
     outstanding: 256,
+    outstandingBase: 0,
+    outstandingStep: 100,
     connectionsPerHost: 1,
     ops: 100000,
     series: 10,
@@ -188,6 +195,8 @@ exports.outputTestHeader = function outputTestHeader(options) {
   var driverVersion = JSON.parse(fs.readFileSync('node_modules/cassandra-driver/package.json', 'utf8')).version;
   console.log('- Driver v%s', driverVersion);
   console.log('- Connections per hosts: %d', options.connectionsPerHost);
+  console.log('- Base outstanding requests: %d', options.outstandingBase);
+  console.log('- Step outstanding requests: %d', options.outstandingStep);
   console.log('- Max outstanding requests: %d', options.outstanding);
   console.log('- Max requests per second: %d', options.throttle);
   console.log('- Operations per series: %d', options.ops);
@@ -243,15 +252,8 @@ exports.timesPerSec = function (count, limit, perSec, iteratorFunc, onInterval, 
     iteratorFunc(i, next);
   }
 
-  let done = false;
-  let finalErr = null;
-
   const interval = setInterval(() => {
     onInterval();
-    if (done) {
-      clearInterval(interval);
-      callback(finalErr);
-    }
     let toSubmit;
     if (queuedCount == 0) {
       submittedInSecond = 0;
@@ -277,16 +279,19 @@ exports.timesPerSec = function (count, limit, perSec, iteratorFunc, onInterval, 
 
   function next(err) {
     if (err) {
-      finalErr = err;
-      done = true;
+      clearInterval(interval);
+      onInterval();
+      callback(err);
+      callback = noop;
       return;
     }
     if (++completed === count) {
-      done = true;
+      clearInterval(interval);
+      onInterval();
+      callback();
       return;
     }
     if (++index >= count) {
-      done = true;
       return;
     }
 
@@ -451,6 +456,48 @@ exports.logTimer = function (timer, millis, start, count) {
     (mem.rss / 1024.0 / 1024.0).toFixed(2),
     (mem.heapTotal / 1024.0 / 1024.0).toFixed(2),
     (mem.heapUsed / 1024.0 / 1024.0).toFixed(2)));
+  return millis;
+};
+
+exports.logTimerHeaderForTarget = function () {
+  console.log(logTargetHeaderFormat);
+};
+
+exports.logTimerForTarget = function (target, timer, millis, start, count) {
+  let meanRate = count;
+  // if start or elapsed is set calculate rate. 
+  // otherwise assume count encompasses responses in 1 second interval.
+  if (millis || start) {
+    if (!millis) {
+      const elapsed = process.hrtime(start);
+      millis = elapsed[0] * 1000 + elapsed[1] / 1000000;
+    } else if (Array.isArray(millis)) {
+      millis = millis.reduce(function (p, v) { return p + v; }, 0);
+    }
+    meanRate = count * 1000 / millis;
+  }
+  if (!timer) {
+    // Use process.hrtime()
+    console.log(sprintf(logTargetFormat,
+      target, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      meanRate.toFixed(2)));
+      return millis;
+  }
+
+  var percentiles = timer.percentiles([0.25,0.50,0.75,0.95,0.98,0.99,0.999]);
+  console.log(sprintf(logTargetFormat,
+    target,
+    timer.min().toFixed(2),
+    percentiles['0.25'].toFixed(2),
+    percentiles['0.5'].toFixed(2),
+    percentiles['0.75'].toFixed(2),
+    percentiles['0.95'].toFixed(2),
+    percentiles['0.98'].toFixed(2),
+    percentiles['0.99'].toFixed(2),
+    percentiles['0.999'].toFixed(2),
+    timer.max().toFixed(2),
+    timer.mean().toFixed(2),
+    meanRate.toFixed(2)));
   return millis;
 };
 
