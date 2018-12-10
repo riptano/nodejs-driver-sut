@@ -90,6 +90,7 @@ var parseOptions = exports.parseOptions = function parseOptions(optionNames, def
 exports.parseCommonOptions = function parseCommonOptions(defaults) {
   var options = parseOptions({
     'c':  ['contactPoint', 'Cassandra contact point'],
+    'dc':  ['localDataCenter', 'Local data center'],
     'ks': ['keyspace', 'Keyspace name'],
     'p':  ['connectionsPerHost', 'Number of connections per host'],
     'r':  ['ops', 'Number of requests per series'],
@@ -110,7 +111,8 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
     throttle: 1000000,
     promiseFactoryName: 'default',
     measureLatency: false,
-    driverPackageName: 'cassandra-driver'
+    driverPackageName: 'cassandra-driver',
+    localDataCenter: 'dc1'
   }, defaults));
 
   if (options.promiseFactoryName === 'bluebird') {
@@ -137,7 +139,7 @@ exports.connectOptions = function connectOptions() {
   var options = this.parseCommonOptions();
   return {
     contactPoints: [ options.contactPoint || '127.0.0.1' ],
-    localDataCenter: 'dc1',
+    localDataCenter: options.localDataCenter,
     policies: { loadBalancing: new cassandra.policies.loadBalancing.DCAwareRoundRobinPolicy()},
     socketOptions: { tcpNoDelay: true },
     pooling: {
