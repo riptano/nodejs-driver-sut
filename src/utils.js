@@ -132,14 +132,40 @@ exports.parseCommonOptions = function parseCommonOptions(defaults) {
  */
 exports.connectOptions = function connectOptions() {
   var options = this.parseCommonOptions();
-  return {
-    contactPoints: [ options.contactPoint || '127.0.0.1' ],
-    policies: { loadBalancing: new cassandra.policies.loadBalancing.DCAwareRoundRobinPolicy()},
-    socketOptions: { tcpNoDelay: true },
-    pooling: {
-      coreConnectionsPerHost: {'0': options.connectionsPerHost, '1': 1, '2': 0},
-      heartBeatInterval: 30000
+
+  const dse = require('dse-driver');
+
+  if (process.env['USE_SNI'] === 'TRUE') {
+
+    console.log('--using SNI');
+
+    const sslOptions = {
+      key: fs.readFileSync('/home/ubuntu/certs/key'),
+      cert: fs.readFileSync('/home/ubuntu/certs/cert'),
+      ca: [ fs.readFileSync('/home/ubuntu/certs/ca.crt') ]
+    };
+
+    return {
+      contactPoints: ['bd183ae6-e6ab-4ecc-a5b9-a6eaf65f7639'],
+      localDataCenter: 'aws-us-west-2',
+      authProvider: new dse.auth.DsePlainTextAuthProvider('loadtest', 'cp1407test'),
+      keyspace: 'loadtest',
+      sslOptions,
+      sni: { address: '0b9c411a-f648-4d66-97eb-ccbb0169937b.dse-test.datastax.com:30002' },
+      socketOptions: { readTimeout: 0 }
     }
+  }
+
+  console.log('--using Direct');
+
+  return {
+    contactPoints: [ options.contactPoint || '10.13.50.200' ],
+    localDataCenter: 'aws-us-west-2',
+    authProvider: new dse.auth.DsePlainTextAuthProvider('loadtest', 'cp1407test'),
+    keyspace: 'loadtest',
+    sslOptions: {},
+    protocolOptions: { port: 9142 },
+    socketOptions: { readTimeout: 0 }
   };
 };
 

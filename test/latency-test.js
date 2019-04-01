@@ -2,10 +2,10 @@
 
 const fs = require('fs');
 const hdr = require('hdr-histogram-js');
-const clientFactory = require('../src/client-factory');
 const dse = require('dse-driver');
+const utils = require('../src/utils');
 
-const iterations = 20000;
+const iterations = 1000;
 const timesPerIteration = 50;
 const delay = 20;
 
@@ -57,15 +57,23 @@ function finish(client) {
   setTimeout(() => client.shutdown(), 1000);
 }
 
-clientFactory
-  .createAndConnect()
-  .then(client => {
+const client = new dse.Client(utils.connectOptions());
+
+client.on('log', (level, className, message) => {
+  if (level !== 'verbose') {
+    console.log(level, className, message);
+  }
+});
+
+client
+  .connect()
+  .then(() => {
     client.on('hostDown', host => console.log(`-----Host ${host.address} is considered DOWN-----`));
     client.on('hostUp', host => console.log(`-----Host ${host.address} is considered back UP-----`));
 
     setInterval(() => console.log(client.getState().toString()), 10000);
 
-    return startBenchmark(client, new MixedWorkload(client, histogram, 3));
+    return startBenchmark(client, new MixedWorkload(client, histogram, 1));
   });
 
 
@@ -116,9 +124,9 @@ class MixedWorkload {
 
   async init() {
     const queries = [
-      `USE ks_benchmarks_rf${this.replicationFactor}`,
-      'DROP TABLE IF EXISTS standard1',
-      'CREATE TABLE standard1 (key blob PRIMARY KEY,c0 blob,c1 blob,c2 blob,c3 blob,c4 blob)'
+      // `USE ks_benchmarks_rf${this.replicationFactor}`,
+      // 'DROP TABLE IF EXISTS standard1',
+      'CREATE TABLE IF NOT EXISTS standard1 (key blob PRIMARY KEY,c0 blob,c1 blob,c2 blob,c3 blob,c4 blob)'
     ];
 
     for (const q of queries) {

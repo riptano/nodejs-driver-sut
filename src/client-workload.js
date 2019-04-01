@@ -62,6 +62,13 @@ ClientWorkload.prototype.run = function (options, callback) {
   // eslint-disable-next-line global-require
   var Client = require(this._commandLineOptions.driverPackageName).Client;
   this._client = new Client(utils.connectOptions());
+
+  this._client.on('log', (level, className, message) => {
+    if (level !== 'verbose') {
+      console.log(level, className, message);
+    }
+  });
+
   var self = this;
   utils.series([
     this._client.connect.bind(this._client),

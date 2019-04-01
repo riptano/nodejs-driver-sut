@@ -1,25 +1,31 @@
 'use strict';
-var cassandra = require('cassandra-driver');
+var dse = require('dse-driver');
 var assert = require('assert');
 var metrics = require('metrics');
-var types = cassandra.types;
+var types = dse.types;
 var utils = require('../src/utils');
 var currentMicros = utils.currentMicros;
 
 var options = utils.parseCommonOptions();
 
 var keyspace = options.keyspace || 'killrvideo';
-var client = new cassandra.Client(utils.extend({ keyspace: keyspace }, utils.connectOptions()));
+var client = new dse.Client(utils.extend({ keyspace: keyspace }, utils.connectOptions()));
 var insertQuery = 'INSERT INTO comments_by_video (videoid, commentid, comment) VALUES (?, ?, ?)';
 var selectQuery = 'SELECT comment FROM comments_by_video WHERE videoid = ? and commentid = ?';
 var commentIds = utils.times(options.ops / 100, types.TimeUuid.now);
 var videoIds = utils.times(options.ops / 100, types.Uuid.random);
 var limit = options.outstanding;
 
+client.on('log', (level, className, message) => {
+  if (level !== 'verbose') {
+    console.log(level, className, message);
+  }
+});
+
 utils.series([
-  function initSchema(seriesNext) {
-    utils.initSchema(utils.connectOptions(), keyspace, seriesNext);
-  },
+  // function initSchema(seriesNext) {
+  //   //utils.initSchema(utils.connectOptions(), keyspace, seriesNext);
+  // },
   client.connect.bind(client),
   function warmup(seriesNext) {
     utils.aTimes(100, function (n, next) {

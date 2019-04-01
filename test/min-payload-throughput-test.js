@@ -1,5 +1,5 @@
 'use strict';
-var cassandra = require('cassandra-driver');
+var dse = require('dse-driver');
 var assert = require('assert');
 var async = require('async');
 var metrics = require('metrics');
@@ -9,31 +9,26 @@ var currentMicros = utils.currentMicros;
 
 var options = utils.parseCommonOptions();
 
-var client = new cassandra.Client({
-  contactPoints: [ options.contactPoint || '127.0.0.1' ],
-  policies: { loadBalancing: new cassandra.policies.loadBalancing.DCAwareRoundRobinPolicy()},
-  socketOptions: {
-    tcpNoDelay: true,
-    readTimeout: 0
-  },
-  pooling: {
-    coreConnectionsPerHost: {'0': options.connectionsPerHost, '1': 1, '2': 0},
-    heartBeatInterval: 0
-  }
-});
+var client = new dse.Client(utils.connectOptions());
 
 var insertQuery = "INSERT INTO t (id) VALUES ('a')";
 var limit = options.outstanding;
+
+client.on('log', (level, className, message) => {
+  if (level !== 'verbose') {
+    console.log(level, className, message);
+  }
+});
 
 async.series([
   client.connect.bind(client),
   function createSchema(seriesNext) {
     var queries = [
-      "DROP KEYSPACE IF EXISTS ks_iqtt",
-      "CREATE KEYSPACE ks_iqtt " +
-        "WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false",
-      "USE ks_iqtt",
-      "CREATE TABLE t (id text PRIMARY KEY)"
+      // "DROP KEYSPACE IF EXISTS ks_iqtt",
+      // "CREATE KEYSPACE ks_iqtt " +
+      //   "WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false",
+      // "USE ks_iqtt",
+      "CREATE TABLE IF NOT EXISTS t (id text PRIMARY KEY)"
     ];
     async.eachSeries(queries, client.execute.bind(client), seriesNext);
   },
