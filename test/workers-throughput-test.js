@@ -7,10 +7,19 @@ const utils = require('../src/utils');
 const cmdLineOptions = utils.parseCommonOptions();
 const driver = require(cmdLineOptions.driverPackageName);
 
+const concurrencyLevel = 128;
+const delay = 1000;
+const maxSamples = 25;
+const nanosToMillis = BigInt('1000000');
+
 class Master {
   constructor() {
     this.connectCounter = 0;
     this.warmupCounter = 0;
+    this.resultArray = [];
+    this.totalSamples = 0;
+    this.startTime = null;
+    this.elapsed = null;
   }
 
   init() {
@@ -38,8 +47,8 @@ class Master {
       case 'warmupFinished':
         this.warmupHandler();
         break;
-      case 'iterationFinished':
-        console.log('iterationFinished', msg);
+      case 'countResult':
+        this.countResult(msg.count);
         break;
       case 'notify':
         console.log(`Received on master`, msg.value);
@@ -60,6 +69,42 @@ class Master {
       // All workers are connected
       console.log('All workers warmed up!');
       this.workers.forEach(w => w.send({ cmd: 'start' }));
+      setTimeout(() => this.requestCount(), 200);
+    }
+  }
+
+  countResult(count) {
+    this.resultArray.push(count);
+
+    if (this.resultArray.length === this.workers.length) {
+      console.log('All workers returned count!');
+      const totalCount = this.resultArray.reduce((acc, current) => acc + current);
+      this.resultArray = [];
+
+      if (this.elapsed !== null) {
+        // x     ____ 1000 millis
+        // total ____ elapsedMillis (elapsed/nanosInMillis)
+        const throughput = Number(BigInt(totalCount) * BigInt(1000) * nanosToMillis / this.elapsed);
+
+        console.log(`Throughput ${throughput} ops/s (${this.elapsed/nanosToMillis} ms)`);
+      }
+    }
+  }
+
+  requestCount() {
+    this.workers.forEach(w => w.send({ cmd: 'getCount' }));
+
+    if (this.startTime !== null) {
+      this.elapsed = process.hrtime.bigint() - this.startTime;
+    }
+
+    this.startTime = process.hrtime.bigint();
+
+    if (this.totalSamples++ < maxSamples) {
+      setTimeout(() => this.requestCount(), delay);
+    } else {
+      this.workers.forEach(w => w.send({ cmd: 'finish' }));
+      setTimeout(() => this.workers.forEach(w => w.disconnect()), 1000);
     }
   }
 }
@@ -68,6 +113,8 @@ class Worker {
   constructor() {
     this.selectQuery = 'SELECT key FROM system.local';
     this.opsCount = 0;
+    this.finished = false;
+    this.queryOptions = { prepare: true, isIdempotent: true };
   }
 
   init() {
@@ -80,6 +127,9 @@ class Worker {
         case 'start':
           this.start();
           break;
+        case 'finish':
+          this.finish();
+          break;
         case 'getCount':
           this.getAndResetCount();
           break;
@@ -87,7 +137,7 @@ class Worker {
     });
 
     // const options = utils.connectOptions();
-    const options = { contactPoints: ['127.0.0.1'], localDataCenter: 'datacenter1' };
+    const options = { contactPoints: ['127.0.0.2'], localDataCenter: 'dc1' };
     this.client = new driver.Client(options);
     this.client.connect(err => {
       assert.ifError(err);
@@ -120,49 +170,39 @@ class Worker {
   }
 
   start() {
-    const nanosInASecond = BigInt('1000000000');
-    const count = 1000;
 
-    utils.series(
-      [
-        next => {
-          utils.timesSeries(10, (n, timesSeriesNext) => {
+    for (let i = 0; i < concurrencyLevel; i++) {
+      this.executeOneAtATime();
+    }
 
-            const started = process.hrtime.bigint();
+    process.send({ cmd: 'startupComplete' });
+  }
 
-            utils.timesLimit(
-              count, 64,
-              (n, timesNext) => this.client.execute(this.selectQuery, timesNext),
-              err => {
-                if (!err) {
-                  const diffNanos = process.hrtime.bigint() - started;
-                  process.send({
-                    cmd: 'iterationFinished',
-                    throughput:  (BigInt(count) * nanosInASecond * diffNanos).toString()
-                  });
-                }
-                timesSeriesNext(err);
-              });
-          }, next);
-        },
-        next => {
-          next();
-        },
-        next => {
-          next();
-        }
-      ],
-      err => {
+  executeOneAtATime() {
+    if (this.finished) {
+      this.client.shutdown();
+      return;
+    }
+
+    this.client.execute(this.selectQuery, null, this.queryOptions, err => {
+      if (!this.finished) {
         assert.ifError(err);
-        process.send({ cmd: 'execute finished' });
-        this.client.shutdown();
-      });
+      }
+
+      this.opsCount++;
+      this.executeOneAtATime();
+    });
   }
 
   getAndResetCount() {
     const count = this.opsCount;
     this.opsCount = 0;
 
+    process.send({ cmd: 'countResult', count });
+  }
+
+  finish() {
+    this.finished = true;
   }
 }
 
