@@ -7,14 +7,15 @@ const utils = require('../src/utils');
 const cmdLineOptions = utils.parseCommonOptions();
 const driver = require(cmdLineOptions.driverPackageName);
 
-const concurrencyLevel = 128;
+const concurrencyLevel = 300;
 const delay = 1000;
-const maxSamples = 25;
-const nanosToMillis = BigInt('1000000');
+const maxSamples = 10;
+const nanosToMillis = 1000000;
 
 class Master {
   constructor() {
     this.connectCounter = 0;
+    this.stopCounter = 0;
     this.warmupCounter = 0;
     this.resultArray = [];
     this.totalSamples = 0;
@@ -23,7 +24,6 @@ class Master {
   }
 
   init() {
-    console.log(`Master ${process.pid} is running`);
 
     // Fork workers.
     for (let i = 0; i < cpus; i++) {
@@ -33,7 +33,7 @@ class Master {
     this.workers = Object.keys(cluster.workers).map(k => cluster.workers[k]);
 
     cluster.on('exit', (worker, code) => {
-      console.log(`worker ${worker.process.pid} exited with code ${code}`);
+      //console.log(`worker ${worker.process.pid} exited with code ${code}`);
     });
 
     this.workers.forEach(worker => worker.on('message', msg => this.messageHandler(msg)));
@@ -47,6 +47,9 @@ class Master {
       case 'warmupFinished':
         this.warmupHandler();
         break;
+      case 'stopCompleted':
+        this.stopHandler();
+        break;
       case 'countResult':
         this.countResult(msg.count);
         break;
@@ -59,15 +62,20 @@ class Master {
   connectHandler() {
     if (++this.connectCounter === this.workers.length) {
       // All workers are connected
-      console.log('All workers connected!');
       this.workers.forEach(w => w.send({ cmd: 'warmup' }));
+    }
+  }
+
+  stopHandler() {
+    if (++this.stopCounter === this.workers.length) {
+      // All workers are connected
+      this.workers.forEach(w => w.send({ cmd: 'shutdown' }));
     }
   }
 
   warmupHandler() {
     if (++this.warmupCounter === this.workers.length) {
       // All workers are connected
-      console.log('All workers warmed up!');
       this.workers.forEach(w => w.send({ cmd: 'start' }));
       setTimeout(() => this.requestCount(), 200);
     }
@@ -77,16 +85,15 @@ class Master {
     this.resultArray.push(count);
 
     if (this.resultArray.length === this.workers.length) {
-      console.log('All workers returned count!');
       const totalCount = this.resultArray.reduce((acc, current) => acc + current);
       this.resultArray = [];
 
       if (this.elapsed !== null) {
-        // x     ____ 1000 millis
-        // total ____ elapsedMillis (elapsed/nanosInMillis)
-        const throughput = Number(BigInt(totalCount) * BigInt(1000) * nanosToMillis / this.elapsed);
+        const elapsedMillis = this.elapsed[0] * 1000 + Math.floor(this.elapsed[1] / nanosToMillis);
 
-        console.log(`Throughput ${throughput} ops/s (${this.elapsed/nanosToMillis} ms)`);
+        const throughput = Math.floor(totalCount * 1000 / elapsedMillis);
+
+        console.log(`${concurrencyLevel} ${throughput}`);
       }
     }
   }
@@ -95,15 +102,15 @@ class Master {
     this.workers.forEach(w => w.send({ cmd: 'getCount' }));
 
     if (this.startTime !== null) {
-      this.elapsed = process.hrtime.bigint() - this.startTime;
+      this.elapsed = process.hrtime(this.startTime);
     }
 
-    this.startTime = process.hrtime.bigint();
+    this.startTime = process.hrtime();
 
     if (this.totalSamples++ < maxSamples) {
       setTimeout(() => this.requestCount(), delay);
     } else {
-      this.workers.forEach(w => w.send({ cmd: 'finish' }));
+      this.workers.forEach(w => w.send({ cmd: 'stop' }));
       setTimeout(() => this.workers.forEach(w => w.disconnect()), 1000);
     }
   }
@@ -111,9 +118,9 @@ class Master {
 
 class Worker {
   constructor() {
-    this.selectQuery = 'SELECT key FROM system.local';
     this.opsCount = 0;
-    this.finished = false;
+    this.isStopped = false;
+    this.stopCounter = 0;
     this.queryOptions = { prepare: true, isIdempotent: true };
   }
 
@@ -121,14 +128,16 @@ class Worker {
     process.on('message', msg => {
       switch (msg.cmd) {
         case 'warmup':
-          console.log('warmup received on worker');
           this.warmup();
           break;
         case 'start':
           this.start();
           break;
-        case 'finish':
-          this.finish();
+        case 'shutdown':
+          this.shutdown();
+          break;
+        case 'stop':
+          this.setStopWorkload();
           break;
         case 'getCount':
           this.getAndResetCount();
@@ -136,31 +145,22 @@ class Worker {
       }
     });
 
-    // const options = utils.connectOptions();
+    //const options = utils.connectOptions();
     const options = { contactPoints: ['127.0.0.2'], localDataCenter: 'dc1' };
     this.client = new driver.Client(options);
     this.client.connect(err => {
       assert.ifError(err);
       process.send({ cmd: 'connected', value: Date.now() });
     });
-
-    console.log(`Worker ${process.pid} started`);
   }
 
   warmup() {
-    console.log('warmup starting');
     utils.series(
       [
         next => {
-          utils.timesLimit(10, 10, (n, timesNext) => {
-            this.client.execute(this.selectQuery, timesNext);
+          utils.timesLimit(1000, 10, (n, timesNext) => {
+            this.client.execute(this.getQuery(), this.getParameters(), timesNext);
           }, next);
-        },
-        next => {
-          next();
-        },
-        next => {
-          next();
         }
       ],
       err => {
@@ -172,26 +172,31 @@ class Worker {
   start() {
 
     for (let i = 0; i < concurrencyLevel; i++) {
-      this.executeOneAtATime();
+      this.executeOneAtATime(i);
     }
 
     process.send({ cmd: 'startupComplete' });
   }
 
-  executeOneAtATime() {
-    if (this.finished) {
-      this.client.shutdown();
-      return;
+  executeOneAtATime(index) {
+    if (this.isStopped) {
+      return this.stopWorkload();
     }
 
-    this.client.execute(this.selectQuery, null, this.queryOptions, err => {
-      if (!this.finished) {
-        assert.ifError(err);
-      }
+    this.client.execute(this.getQuery(index), this.getParameters(index), this.queryOptions, err => {
+      assert.ifError(err);
 
       this.opsCount++;
-      this.executeOneAtATime();
+      this.executeOneAtATime(index);
     });
+  }
+
+  getQuery(index) {
+    return 'SELECT key FROM system.local';
+  }
+
+  getParameters(index) {
+    return null;
   }
 
   getAndResetCount() {
@@ -201,8 +206,19 @@ class Worker {
     process.send({ cmd: 'countResult', count });
   }
 
-  finish() {
-    this.finished = true;
+  setStopWorkload() {
+    this.isStopped = true;
+  }
+
+  stopWorkload() {
+    if (++this.stopCounter === concurrencyLevel) {
+      process.send({ cmd: 'stopCompleted' });
+      this.stopCounter = 0;
+    }
+  }
+
+  shutdown() {
+    this.client.shutdown();
   }
 }
 
