@@ -1,7 +1,10 @@
 module.exports = {
   "env": {
     "commonjs": true,
-    "es6": false
+    "es6": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2019
   },
   "extends": "eslint:recommended",
   "rules": {
@@ -100,8 +103,10 @@ module.exports = {
     "Symbol": false,
     "process": false,
     "setTimeout": false,
+    "setInterval": false,
     "setImmediate": false,
     "clearTimeout": false,
+    "clearInterval": false,
     "describe": false,
     "it": false,
     "context": false,
