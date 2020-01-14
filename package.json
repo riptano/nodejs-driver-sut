@@ -4,8 +4,8 @@
   "author": "DataStax",
   "dependencies": {
     "hdr-histogram-js": "^1.1.4",
-    "yargs": "^14.2.0",
-    "mkdirp": "^0.5.1"
+    "mkdirp": "^0.5.1",
+    "yargs": "^14.2.0"
   },
   "licenses": [
     {
