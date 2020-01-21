@@ -60,16 +60,7 @@ if [ $helpFlagFound -eq 1 ]; then
 	exit 255
 fi
 
-echo "1.0	0.0	0%" > ./xlabels.dat
-echo "10.0	0.0	90%" >> ./xlabels.dat
-echo "100.0	0.0	99%" >> ./xlabels.dat
-echo "1000.0	0.0	99.9%" >> ./xlabels.dat
-echo "10000.0	0.0	99.99%" >> ./xlabels.dat
-echo "100000.0	0.0	99.999%" >> ./xlabels.dat
-echo "1000000.0	0.0	99.9999%" >> ./xlabels.dat
-echo "10000000.0	0.0	99.99999%" >> ./xlabels.dat
-
-IndividualFilePlotCommands="'./xlabels.dat' with labels center offset 0, -1 point"
+IndividualFilePlotCommands="'./charts/xlabels.dat' with labels center offset 0, -1 point"
 IndividualFilePlotCommands="$IndividualFilePlotCommands, '$FILE1' using 4:1 with lines title 'baseline' lw 2"
 IndividualFilePlotCommands="$IndividualFilePlotCommands, '$FILE2' using 4:1 with lines title 'compare' lw 2"
 
@@ -96,6 +87,5 @@ message $IndividualFilePlotCommands
     echo "set key top left"
     echo "set bmargin 3"
     echo "set xrange [*:10000]"
-    #echo "set style line 1 lt 1 lw 10 pt 3"
     echo "plot $IndividualFilePlotCommands"
 ) | gnuplot
